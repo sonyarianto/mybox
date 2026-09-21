@@ -11,19 +11,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgListener;
 use sqlx::{PgPool, Postgres, Row, Transaction};
-use task_core::billing::{
+use mybox_core::billing::{
     BILLING_PROTOCOL_VERSION, BillingEvent, BillingEventType, Entitlement, FREE_SPACE_LIMIT,
     PRO_SPACE_LIMIT, SubscriptionPlan, SubscriptionStatus, SyncAccessMode,
 };
-use task_core::crdt::SpaceDoc;
-use task_core::sync::{
+use mybox_core::crdt::SpaceDoc;
+use mybox_core::sync::{
     EncodedUpdate, MAX_SYNC_SNAPSHOT_BYTES, MAX_SYNC_STATE_VECTOR_BYTES, MAX_SYNC_UPDATE_BYTES,
     SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_PROTOCOL_VERSION, SYNC_RECONCILE_PROTOCOL_VERSION,
     SpaceMetadataOperation, SyncEvent, SyncMetadataEvent, SyncMetadataRequest,
     SyncMetadataResponse, SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncReconcileRequest,
     SyncReconcileResponse,
 };
-use task_core::{BoardData, EntityId, SpaceManifestEntry};
+use mybox_core::{BoardData, EntityId, SpaceManifestEntry};
 use thiserror::Error;
 use tokio::sync::{broadcast, oneshot};
 use uuid::Uuid;
@@ -105,7 +105,7 @@ pub struct CrudSpaceRecord {
 const MAX_SAFE_ENTITY_ID: u64 = (1u64 << 53) - 1;
 const MAX_BILLING_FIELD_LEN: usize = 256;
 const MAX_SYNC_REPLAY_EVENTS: usize = 1_000;
-const SYNC_EVENT_CHANNEL: &str = "task_space_sync_events";
+const SYNC_EVENT_CHANNEL: &str = "mybox_sync_events";
 
 impl PostgresSyncStore {
     pub fn new(pool: PgPool) -> Self {
@@ -342,7 +342,7 @@ impl PostgresSyncStore {
             .unwrap_or_else(|| {
                 Uuid::new_v5(
                     &Uuid::NAMESPACE_URL,
-                    format!("https://task-space.invalid/account/{account_id}/space/{space_id}")
+                    format!("https://mybox.invalid/account/{account_id}/space/{space_id}")
                         .as_bytes(),
                 )
             });
@@ -1707,7 +1707,7 @@ impl PostgresBillingStore {
             .map(|duration| duration.as_secs() / 300)
             .unwrap_or_default() as i64;
         let idempotency_key = format!(
-            "task-space-checkout:{}:{}:{}",
+            "mybox-checkout:{}:{}:{}",
             account_id,
             interval,
             Uuid::new_v4()
@@ -2455,10 +2455,10 @@ mod tests {
     use std::time::Duration;
 
     use super::{PostgresStoreError, PostgresSyncStore, event_cursor_range_requires_reset};
-    use task_core::BoardData;
-    use task_core::Note;
-    use task_core::crdt::SpaceDoc;
-    use task_core::sync::{
+    use mybox_core::BoardData;
+    use mybox_core::Note;
+    use mybox_core::crdt::SpaceDoc;
+    use mybox_core::sync::{
         EncodedUpdate, SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_RECONCILE_PROTOCOL_VERSION,
         SyncReconcileRequest,
     };
@@ -2475,10 +2475,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires TASK_SPACE_TEST_DATABASE_URL"]
+    #[ignore = "requires MYBOX_TEST_DATABASE_URL"]
     async fn postgres_listener_forwards_committed_events_between_instances() {
-        let database_url = std::env::var("TASK_SPACE_TEST_DATABASE_URL")
-            .expect("set TASK_SPACE_TEST_DATABASE_URL for the PostgreSQL listener test");
+        let database_url = std::env::var("MYBOX_TEST_DATABASE_URL")
+            .expect("set MYBOX_TEST_DATABASE_URL for the PostgreSQL listener test");
         let source = PostgresSyncStore::connect(&database_url)
             .await
             .expect("source PostgreSQL connection should work");
@@ -2563,10 +2563,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires TASK_SPACE_TEST_DATABASE_URL"]
+    #[ignore = "requires MYBOX_TEST_DATABASE_URL"]
     async fn postgres_reconcile_transaction_faults_roll_back_all_stages() {
-        let database_url = std::env::var("TASK_SPACE_TEST_DATABASE_URL")
-            .expect("set TASK_SPACE_TEST_DATABASE_URL for transaction fault acceptance");
+        let database_url = std::env::var("MYBOX_TEST_DATABASE_URL")
+            .expect("set MYBOX_TEST_DATABASE_URL for transaction fault acceptance");
         let store = PostgresSyncStore::connect(&database_url)
             .await
             .expect("PostgreSQL connection should work");

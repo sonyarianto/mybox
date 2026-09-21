@@ -13,7 +13,7 @@ check: ## compile everything
 	cargo check --workspace
 
 cloudflare-tunnel: ## expose the local deployment through the named Cloudflare Tunnel
-	cloudflared tunnel --no-autoupdate run --url http://127.0.0.1:8081 task-space-dev
+	cloudflared tunnel --no-autoupdate run --url http://127.0.0.1:8081 mybox-dev
 
 browser-sync: ## exercise offline tabs, IndexedDB recovery, and fallbacks in headless Chromium
 	python3 scripts/browser-sync-smoke.py
@@ -40,13 +40,13 @@ migration-acceptance: ## validate clean-install and legacy-schema migrations in 
 	./scripts/migration-acceptance.sh
 
 capacity-acceptance: ## run the larger 10k-space/100k-update migration rehearsal
-	TASK_SPACE_MIGRATION_SIZED_SPACES=10000 TASK_SPACE_MIGRATION_SIZED_UPDATES=100000 ./scripts/migration-acceptance.sh
+	MYBOX_MIGRATION_SIZED_SPACES=10000 MYBOX_MIGRATION_SIZED_UPDATES=100000 ./scripts/migration-acceptance.sh
 
 restart-chaos: ## restart local acceptance API/PostgreSQL and verify recovery
-	TASK_SPACE_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_RESTART_TEST ./scripts/restart-acceptance-smoke.sh
+	MYBOX_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_RESTART_TEST ./scripts/restart-acceptance-smoke.sh
 
 process-kill-chaos: ## abruptly terminate local acceptance API/PostgreSQL and verify recovery
-	TASK_SPACE_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_KILL_TEST ./scripts/process-kill-acceptance.sh
+	MYBOX_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_KILL_TEST ./scripts/process-kill-acceptance.sh
 
 alert-delivery: ## exercise Prometheus to Alertmanager webhook delivery locally
 	./scripts/alert-delivery-acceptance.sh

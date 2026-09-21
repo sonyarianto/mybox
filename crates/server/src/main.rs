@@ -4,13 +4,13 @@ use axum::http::header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, RET
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::middleware;
 use sqlx::PgPool;
-use task_server::auth::{LocalAuth, LocalAuthConfig};
-use task_server::http::{
+use mybox_server::auth::{LocalAuth, LocalAuthConfig};
+use mybox_server::http::{
     RequestRateLimiter, SyncHttpState, add_request_id, health_router, metrics_router,
     protected_api_router,
 };
-use task_server::metrics::Metrics;
-use task_server::postgres::PostgresSyncStore;
+use mybox_server::metrics::Metrics;
+use mybox_server::postgres::PostgresSyncStore;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use url::Url;
 
@@ -33,8 +33,8 @@ async fn main() {
         .expect("auth database readiness check should pass");
     let metrics = Metrics::default();
     let configured_origins = allowed_origins();
-    if std::env::var("TASK_SPACE_ALLOWED_ORIGINS").is_ok() && configured_origins.is_empty() {
-        panic!("TASK_SPACE_ALLOWED_ORIGINS did not contain a valid HTTP(S) origin");
+    if std::env::var("MYBOX_ALLOWED_ORIGINS").is_ok() && configured_origins.is_empty() {
+        panic!("MYBOX_ALLOWED_ORIGINS did not contain a valid HTTP(S) origin");
     }
     let local_cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate({
@@ -63,15 +63,15 @@ async fn main() {
         ])
         .expose_headers([
             HeaderName::from_static("x-request-id"),
-            HeaderName::from_static("x-task-space-error-code"),
+            HeaderName::from_static("x-mybox-error-code"),
             RETRY_AFTER,
         ])
         .allow_credentials(true);
-    let app = task_server::auth::router(auth.clone())
+    let app = mybox_server::auth::router(auth.clone())
         .merge(health_router(store.pool().clone(), metrics.clone()))
         .merge(metrics_router(
             metrics.clone(),
-            std::env::var("TASK_SPACE_METRICS_TOKEN").ok(),
+            std::env::var("MYBOX_METRICS_TOKEN").ok(),
         ))
         .merge(protected_api_router(SyncHttpState {
             store,
@@ -87,12 +87,12 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .expect("server should bind");
-    println!("task-space server listening on {listener:?}");
+    println!("mybox server listening on {listener:?}");
     axum::serve(listener, app).await.expect("server should run");
 }
 
 fn allowed_origins() -> Vec<String> {
-    if let Ok(value) = std::env::var("TASK_SPACE_ALLOWED_ORIGINS") {
+    if let Ok(value) = std::env::var("MYBOX_ALLOWED_ORIGINS") {
         // Presence of the explicit variable is authoritative, even if an
         // operator mistyped an origin. Falling back in that case could widen
         // a deliberately restricted production policy.

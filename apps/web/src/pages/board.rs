@@ -21,15 +21,15 @@ use leptos::leptos_dom::helpers::{window_event_listener, window_event_listener_u
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use task_core::crdt::SpaceDoc;
-use task_core::sync::EncodedUpdate;
-use task_core::sync::{
+use mybox_core::crdt::SpaceDoc;
+use mybox_core::sync::EncodedUpdate;
+use mybox_core::sync::{
     MAX_SYNC_SNAPSHOT_BYTES, MAX_SYNC_STATE_VECTOR_BYTES, MAX_SYNC_UPDATE_BYTES,
     SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_PROTOCOL_VERSION, SYNC_RECONCILE_PROTOCOL_VERSION,
     SpaceMetadataOperation, SyncEvent, SyncMetadataRequest, SyncMetadataResponse, SyncPullRequest,
     SyncPullResponse, SyncReconcileRequest, SyncReconcileResponse,
 };
-use task_core::{
+use mybox_core::{
     BoardData, CURRENT_SCHEMA_VERSION, Group, Note, NoteColor, NoteStatus, Space,
     SpaceManifestEntry, Tombstone, TombstoneKind, WorkspaceData, is_valid_stable_id,
     legacy_entity_stable_id,
@@ -41,15 +41,15 @@ use web_sys::{
     HtmlTextAreaElement, RequestCredentials, Url,
 };
 
-const STORAGE_KEY: &str = "task-space.board.v2";
-const LEGACY_STORAGE_KEY: &str = "task-space.board.v1";
-const LEGACY_WORKSPACE_STORAGE_KEY: &str = "task-space.workspace.v1";
+const STORAGE_KEY: &str = "mybox.board.v2";
+const LEGACY_STORAGE_KEY: &str = "mybox.board.v1";
+const LEGACY_WORKSPACE_STORAGE_KEY: &str = "mybox.workspace.v1";
 #[cfg(target_arch = "wasm32")]
-const DEVICE_ID_STORAGE_KEY: &str = "task-space.device-id.v1";
-const GUEST_PRINCIPAL_STORAGE_KEY: &str = "task-space.guest-principal.v1";
-const GUEST_LEGACY_MIGRATED_STORAGE_KEY: &str = "task-space.guest-legacy-migrated.v1";
-const VIEW_STORAGE_KEY_PREFIX: &str = "task-space.view.v2.";
-const LEGACY_VIEW_STORAGE_KEY: &str = "task-space.view.v1";
+const DEVICE_ID_STORAGE_KEY: &str = "mybox.device-id.v1";
+const GUEST_PRINCIPAL_STORAGE_KEY: &str = "mybox.guest-principal.v1";
+const GUEST_LEGACY_MIGRATED_STORAGE_KEY: &str = "mybox.guest-legacy-migrated.v1";
+const VIEW_STORAGE_KEY_PREFIX: &str = "mybox.view.v2.";
+const LEGACY_VIEW_STORAGE_KEY: &str = "mybox.view.v1";
 const MAX_HISTORY: usize = 100;
 const NOTE_WIDTH: f64 = 208.0;
 const NOTE_HEIGHT: f64 = 200.0;
@@ -317,18 +317,18 @@ thread_local! {
 
 #[wasm_bindgen(inline_js = r#"
 // 2026-09-08 static snippet cache-bust for the ngrok Wasm/SRI fix.
-let taskSpaceSyncPrincipal = "guest";
-const taskSpaceGuestLegacyMigratedKey = "task-space.guest-legacy-migrated.v1";
-const taskSpaceMaxOutboxEntries = 128;
-const taskSpaceMaxOutboxBytes = 8 * 1024 * 1024;
+let myboxSyncPrincipal = "guest";
+const myboxGuestLegacyMigratedKey = "mybox.guest-legacy-migrated.v1";
+const myboxMaxOutboxEntries = 128;
+const myboxMaxOutboxBytes = 8 * 1024 * 1024;
 // The server accepts at most 2 MiB of decoded reconcile update. A URL-safe
 // base64 envelope for that payload is about 2.8 MiB, so never coalesce a
 // larger local snapshot into a recovery mutation that the server must reject.
-const taskSpaceMaxRecoveryEnvelopeChars = Math.ceil((2 * 1024 * 1024) / 3) * 4;
-const taskSpaceLocalBroadcastProtocolVersion = 1;
-const taskSpaceLocalStorageSyncKeyBase = "task-space.local-sync.v1";
-const taskSpaceTabId = (() => {
-  const key = "task-space.local-tab-id.v1";
+const myboxMaxRecoveryEnvelopeChars = Math.ceil((2 * 1024 * 1024) / 3) * 4;
+const myboxLocalBroadcastProtocolVersion = 1;
+const myboxLocalStorageSyncKeyBase = "mybox.local-sync.v1";
+const myboxTabId = (() => {
+  const key = "mybox.local-tab-id.v1";
   try {
     const existing = globalThis.sessionStorage?.getItem(key);
     if (existing) return existing;
@@ -341,47 +341,47 @@ const taskSpaceTabId = (() => {
     return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   }
 })();
-let taskSpaceLocalBroadcast = null;
-let taskSpaceLocalStorageListener = null;
-let taskSpaceLocalBroadcastOnUpdate = null;
-let taskSpaceLocalBroadcastPrincipal = "guest";
-let taskSpaceLocalStorageSyncKey = `${taskSpaceLocalStorageSyncKeyBase}:guest`;
+let myboxLocalBroadcast = null;
+let myboxLocalStorageListener = null;
+let myboxLocalBroadcastOnUpdate = null;
+let myboxLocalBroadcastPrincipal = "guest";
+let myboxLocalStorageSyncKey = `${myboxLocalStorageSyncKeyBase}:guest`;
 
-function taskSpaceIsGuestPrincipal(principal) {
+function myboxIsGuestPrincipal(principal) {
   const value = String(principal || "guest");
   return value === "guest" || value.startsWith("guest:");
 }
 
-function taskSpaceCanReadLegacyGuest() {
-  if (!taskSpaceIsGuestPrincipal(taskSpaceSyncPrincipal)) return false;
+function myboxCanReadLegacyGuest() {
+  if (!myboxIsGuestPrincipal(myboxSyncPrincipal)) return false;
   try {
-    return globalThis.localStorage?.getItem(taskSpaceGuestLegacyMigratedKey) !== "1";
+    return globalThis.localStorage?.getItem(myboxGuestLegacyMigratedKey) !== "1";
   } catch (_) {
     return true;
   }
 }
 
-function taskSpaceMarkLegacyGuestMigrated(principal) {
-  if (!taskSpaceIsGuestPrincipal(principal)) return;
+function myboxMarkLegacyGuestMigrated(principal) {
+  if (!myboxIsGuestPrincipal(principal)) return;
   try {
-    globalThis.localStorage?.setItem(taskSpaceGuestLegacyMigratedKey, "1");
+    globalThis.localStorage?.setItem(myboxGuestLegacyMigratedKey, "1");
   } catch (_) {}
 }
 
-function taskSpaceKey(key) {
-  return taskSpaceKeyFor(taskSpaceSyncPrincipal, key);
+function myboxKey(key) {
+  return myboxKeyFor(myboxSyncPrincipal, key);
 }
 
-function taskSpaceKeyFor(principal, key) {
+function myboxKeyFor(principal, key) {
   return `${String(principal || "guest")}:${key}`;
 }
 
-export function taskSpaceSetSyncPrincipal(principal) {
-  taskSpaceSyncPrincipal = String(principal || "guest");
-  return taskSpaceSyncPrincipal;
+export function myboxSetSyncPrincipal(principal) {
+  myboxSyncPrincipal = String(principal || "guest");
+  return myboxSyncPrincipal;
 }
 
-function taskSpaceEnsureStores(db) {
+function myboxEnsureStores(db) {
   if (!db.objectStoreNames.contains("workspace")) db.createObjectStore("workspace");
   if (!db.objectStoreNames.contains("crdt")) db.createObjectStore("crdt");
   if (!db.objectStoreNames.contains("crdt-updates")) db.createObjectStore("crdt-updates");
@@ -394,7 +394,7 @@ function taskSpaceEnsureStores(db) {
   if (!db.objectStoreNames.contains("crdt-inbox")) db.createObjectStore("crdt-inbox");
 }
 
-function taskSpaceConfigureDb(db) {
+function myboxConfigureDb(db) {
   // Let a newer app version upgrade the database even when this page is
   // backgrounded. Without this handler, every open connection can keep an
   // older schema alive indefinitely and leave the upgrade request blocked.
@@ -402,33 +402,33 @@ function taskSpaceConfigureDb(db) {
   return db;
 }
 
-function taskSpaceBackupKeyBelongsToPrincipal(principal, key) {
+function myboxBackupKeyBelongsToPrincipal(principal, key) {
   if (typeof key === "bigint" || typeof key === "number") {
-    return taskSpaceIsGuestPrincipal(principal);
+    return myboxIsGuestPrincipal(principal);
   }
   if (typeof key !== "string") return false;
   if (key.startsWith(`${principal}:`)) return true;
   // Guest migration retained a few pre-namespace keys so an interrupted
   // upgrade can still be recovered. Include those only in a guest backup;
   // never mix another account's namespaced records into the export.
-  return taskSpaceIsGuestPrincipal(principal)
+  return myboxIsGuestPrincipal(principal)
     && (key === "current" || key.startsWith("space:") || key.startsWith("space-"));
 }
 
-export function taskSpaceExportIndexedDbBackup(principal) {
-  const requestedPrincipal = String(principal || taskSpaceSyncPrincipal || "guest");
+export function myboxExportIndexedDbBackup(principal) {
+  const requestedPrincipal = String(principal || myboxSyncPrincipal || "guest");
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space");
+    const request = indexedDB.open("mybox");
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const stores = Array.from(db.objectStoreNames);
       const backup = {
-        format: "task-space-indexeddb-backup",
+        format: "mybox-indexeddb-backup",
         formatVersion: 1,
         exportedAt: Date.now(),
         principal: requestedPrincipal,
@@ -440,7 +440,7 @@ export function taskSpaceExportIndexedDbBackup(principal) {
       try {
         for (let index = 0; index < localStorage.length; index += 1) {
           const key = localStorage.key(index);
-          if (key && key.startsWith("task-space.")) {
+          if (key && key.startsWith("mybox.")) {
             backup.localStorage.push({ key, value: localStorage.getItem(key) });
           }
         }
@@ -486,7 +486,7 @@ export function taskSpaceExportIndexedDbBackup(principal) {
             readNextStore();
             return;
           }
-          if (taskSpaceBackupKeyBelongsToPrincipal(requestedPrincipal, cursor.key)) {
+          if (myboxBackupKeyBelongsToPrincipal(requestedPrincipal, cursor.key)) {
             entries.push({ key: cursor.key, value: cursor.value });
           }
           cursor.continue();
@@ -497,7 +497,7 @@ export function taskSpaceExportIndexedDbBackup(principal) {
   });
 }
 
-function taskSpaceEmptySyncRecord(principal, spaceId) {
+function myboxEmptySyncRecord(principal, spaceId) {
   return {
     principal: String(principal || "guest"),
     spaceId: Number(spaceId),
@@ -510,35 +510,35 @@ function taskSpaceEmptySyncRecord(principal, spaceId) {
   };
 }
 
-function taskSpaceSyncRecordKey(principal, spaceId) {
-  return taskSpaceKeyFor(principal, `space:${spaceId}`);
+function myboxSyncRecordKey(principal, spaceId) {
+  return myboxKeyFor(principal, `space:${spaceId}`);
 }
 
-function taskSpaceSafeCounter(value) {
+function myboxSafeCounter(value) {
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= 0 ? number : 0;
 }
 
-function taskSpaceOutboxBytes(entries) {
+function myboxOutboxBytes(entries) {
   return entries.reduce((total, item) => total
     + String(item?.stateVector || "").length
     + String(item?.update || "").length, 0);
 }
 
-function taskSpaceRecoveryMutationId() {
+function myboxRecoveryMutationId() {
   return globalThis.crypto?.randomUUID?.()
     || `recovery-${Date.now()}-${Math.floor(Math.random() * 1_000_000_000)}`;
 }
 
-function taskSpaceWorkspaceValue(value) {
+function myboxWorkspaceValue(value) {
   if (value && typeof value === "object" && typeof value.raw === "string") {
     return value.raw;
   }
   return value;
 }
 
-function taskSpaceWorkspaceObject(value) {
-  const raw = taskSpaceWorkspaceValue(value);
+function myboxWorkspaceObject(value) {
+  const raw = myboxWorkspaceValue(value);
   if (typeof raw !== "string") return null;
   try {
     const parsed = JSON.parse(raw);
@@ -548,65 +548,65 @@ function taskSpaceWorkspaceObject(value) {
   }
 }
 
-function taskSpaceWorkspaceSpaceKey(space) {
+function myboxWorkspaceSpaceKey(space) {
   const stableId = typeof space?.stable_id === "string" ? space.stable_id.trim() : "";
   return stableId ? `stable:${stableId}` : `id:${Number(space?.id)}`;
 }
 
-function taskSpaceWorkspaceNumber(value) {
+function myboxWorkspaceNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
-function taskSpaceWorkspaceHasBoardProjection(space) {
+function myboxWorkspaceHasBoardProjection(space) {
   return (space?.board?.notes || []).length > 0
     || (space?.board?.groups || []).length > 0
     || (space?.board?.tombstones || []).length > 0;
 }
 
-function taskSpaceWorkspaceBoardVersion(space) {
+function myboxWorkspaceBoardVersion(space) {
   let version = 0;
   for (const note of space?.board?.notes || []) {
-    version = Math.max(version, taskSpaceWorkspaceNumber(note?.updated_at), taskSpaceWorkspaceNumber(note?.deleted_at));
+    version = Math.max(version, myboxWorkspaceNumber(note?.updated_at), myboxWorkspaceNumber(note?.deleted_at));
   }
   for (const group of space?.board?.groups || []) {
-    version = Math.max(version, taskSpaceWorkspaceNumber(group?.updated_at), taskSpaceWorkspaceNumber(group?.deleted_at));
+    version = Math.max(version, myboxWorkspaceNumber(group?.updated_at), myboxWorkspaceNumber(group?.deleted_at));
   }
   for (const tombstone of space?.board?.tombstones || []) {
-    version = Math.max(version, taskSpaceWorkspaceNumber(tombstone?.deleted_at));
+    version = Math.max(version, myboxWorkspaceNumber(tombstone?.deleted_at));
   }
-  return version || taskSpaceWorkspaceNumber(space?.updated_at);
+  return version || myboxWorkspaceNumber(space?.updated_at);
 }
 
-function taskSpaceWorkspaceMetadataKey(space) {
+function myboxWorkspaceMetadataKey(space) {
   return JSON.stringify({
     name: String(space?.name || ""),
     archived: Boolean(space?.archived),
-    deleted_at: space?.deleted_at == null ? null : taskSpaceWorkspaceNumber(space.deleted_at),
+    deleted_at: space?.deleted_at == null ? null : myboxWorkspaceNumber(space.deleted_at),
   });
 }
 
-function taskSpaceWorkspacePick(existing, incoming) {
-  const existingMetadataVersion = taskSpaceSafeCounter(existing?.metadata_version);
-  const incomingMetadataVersion = taskSpaceSafeCounter(incoming?.metadata_version);
+function myboxWorkspacePick(existing, incoming) {
+  const existingMetadataVersion = myboxSafeCounter(existing?.metadata_version);
+  const incomingMetadataVersion = myboxSafeCounter(incoming?.metadata_version);
   let metadata = incoming;
   if (existingMetadataVersion > incomingMetadataVersion) {
     metadata = existing;
   } else if (existingMetadataVersion === incomingMetadataVersion) {
-    const existingUpdatedAt = taskSpaceWorkspaceNumber(existing?.updated_at);
-    const incomingUpdatedAt = taskSpaceWorkspaceNumber(incoming?.updated_at);
-    const existingKey = taskSpaceWorkspaceMetadataKey(existing);
-    const incomingKey = taskSpaceWorkspaceMetadataKey(incoming);
+    const existingUpdatedAt = myboxWorkspaceNumber(existing?.updated_at);
+    const incomingUpdatedAt = myboxWorkspaceNumber(incoming?.updated_at);
+    const existingKey = myboxWorkspaceMetadataKey(existing);
+    const incomingKey = myboxWorkspaceMetadataKey(incoming);
     if (existingUpdatedAt > incomingUpdatedAt
       || (existingUpdatedAt === incomingUpdatedAt && existingKey > incomingKey)) {
       metadata = existing;
     }
   }
 
-  const existingBoardVersion = taskSpaceWorkspaceBoardVersion(existing);
-  const incomingBoardVersion = taskSpaceWorkspaceBoardVersion(incoming);
-  const existingHasBoard = taskSpaceWorkspaceHasBoardProjection(existing);
-  const incomingHasBoard = taskSpaceWorkspaceHasBoardProjection(incoming);
+  const existingBoardVersion = myboxWorkspaceBoardVersion(existing);
+  const incomingBoardVersion = myboxWorkspaceBoardVersion(incoming);
+  const existingHasBoard = myboxWorkspaceHasBoardProjection(existing);
+  const incomingHasBoard = myboxWorkspaceHasBoardProjection(incoming);
   let board = incoming?.board;
   if (existingHasBoard && !incomingHasBoard) {
     board = existing?.board;
@@ -621,8 +621,8 @@ function taskSpaceWorkspacePick(existing, incoming) {
   }
 
   const createdAt = Math.min(
-    taskSpaceWorkspaceNumber(existing?.created_at) || Number.MAX_SAFE_INTEGER,
-    taskSpaceWorkspaceNumber(incoming?.created_at) || Number.MAX_SAFE_INTEGER,
+    myboxWorkspaceNumber(existing?.created_at) || Number.MAX_SAFE_INTEGER,
+    myboxWorkspaceNumber(incoming?.created_at) || Number.MAX_SAFE_INTEGER,
   );
   return {
     ...metadata,
@@ -630,8 +630,8 @@ function taskSpaceWorkspacePick(existing, incoming) {
     id: Number(incoming?.id ?? existing?.id),
     created_at: createdAt === Number.MAX_SAFE_INTEGER ? 0 : createdAt,
     updated_at: Math.max(
-      taskSpaceWorkspaceNumber(existing?.updated_at),
-      taskSpaceWorkspaceNumber(incoming?.updated_at),
+      myboxWorkspaceNumber(existing?.updated_at),
+      myboxWorkspaceNumber(incoming?.updated_at),
     ),
     board: board || { schema_version: 3, notes: [], groups: [], tombstones: [] },
   };
@@ -641,26 +641,26 @@ function taskSpaceWorkspacePick(existing, incoming) {
 // every writer must preserve sibling spaces and reject a late stale board
 // projection. This makes direct projection saves safe during cross-tab races;
 // canonical CRDT snapshots and outbox rows are committed separately.
-function taskSpaceMergeWorkspaceRaw(existingValue, incomingRaw) {
-  const incoming = taskSpaceWorkspaceObject(incomingRaw);
+function myboxMergeWorkspaceRaw(existingValue, incomingRaw) {
+  const incoming = myboxWorkspaceObject(incomingRaw);
   if (!incoming) return null;
-  const existing = taskSpaceWorkspaceObject(existingValue);
+  const existing = myboxWorkspaceObject(existingValue);
   if (!existing) return incomingRaw;
 
   const spaces = new Map();
   for (const space of existing.spaces) {
-    if (space && typeof space === "object") spaces.set(taskSpaceWorkspaceSpaceKey(space), space);
+    if (space && typeof space === "object") spaces.set(myboxWorkspaceSpaceKey(space), space);
   }
   for (const space of incoming.spaces) {
     if (!space || typeof space !== "object") continue;
-    const key = taskSpaceWorkspaceSpaceKey(space);
+    const key = myboxWorkspaceSpaceKey(space);
     const previous = spaces.get(key);
-    spaces.set(key, previous ? taskSpaceWorkspacePick(previous, space) : space);
+    spaces.set(key, previous ? myboxWorkspacePick(previous, space) : space);
   }
   const mergedSpaces = Array.from(spaces.values()).sort((left, right) => {
-    const created = taskSpaceWorkspaceNumber(left?.created_at) - taskSpaceWorkspaceNumber(right?.created_at);
+    const created = myboxWorkspaceNumber(left?.created_at) - myboxWorkspaceNumber(right?.created_at);
     if (created !== 0) return created;
-    return taskSpaceWorkspaceSpaceKey(left).localeCompare(taskSpaceWorkspaceSpaceKey(right));
+    return myboxWorkspaceSpaceKey(left).localeCompare(myboxWorkspaceSpaceKey(right));
   });
 
   const tombstones = new Map();
@@ -668,14 +668,14 @@ function taskSpaceMergeWorkspaceRaw(existingValue, incomingRaw) {
     if (!tombstone || typeof tombstone !== "object") continue;
     const key = `${String(tombstone.kind || "")}:${String(tombstone.stable_id || "")}:${Number(tombstone.id)}`;
     const previous = tombstones.get(key);
-    if (!previous || taskSpaceWorkspaceNumber(tombstone.deleted_at) >= taskSpaceWorkspaceNumber(previous.deleted_at)) {
+    if (!previous || myboxWorkspaceNumber(tombstone.deleted_at) >= myboxWorkspaceNumber(previous.deleted_at)) {
       tombstones.set(key, tombstone);
     }
   }
   const liveSpaceKeys = new Set(
     mergedSpaces
       .filter((space) => space?.deleted_at == null)
-      .map(taskSpaceWorkspaceSpaceKey),
+      .map(myboxWorkspaceSpaceKey),
   );
   const mergedTombstones = Array.from(tombstones.values()).filter((tombstone) => {
     if (tombstone.kind !== "Space") return true;
@@ -692,8 +692,8 @@ function taskSpaceMergeWorkspaceRaw(existingValue, incomingRaw) {
     ...existing,
     ...incoming,
     schema_version: Math.max(
-      taskSpaceSafeCounter(existing.schema_version),
-      taskSpaceSafeCounter(incoming.schema_version),
+      myboxSafeCounter(existing.schema_version),
+      myboxSafeCounter(incoming.schema_version),
     ),
     spaces: mergedSpaces,
     tombstones: mergedTombstones,
@@ -701,15 +701,15 @@ function taskSpaceMergeWorkspaceRaw(existingValue, incomingRaw) {
   });
 }
 
-export function taskSpaceLoadWorkspace() {
+export function myboxLoadWorkspace() {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
+    const request = indexedDB.open("mybox", 7);
     request.onupgradeneeded = () => {
-      taskSpaceEnsureStores(request.result);
+      myboxEnsureStores(request.result);
       if (!request.result.objectStoreNames.contains("workspace")) {
         request.result.createObjectStore("workspace");
       }
@@ -728,7 +728,7 @@ export function taskSpaceLoadWorkspace() {
     };
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const storeName = Array.from(db.objectStoreNames).includes("workspace")
         ? "workspace"
         : db.objectStoreNames[0];
@@ -738,14 +738,14 @@ export function taskSpaceLoadWorkspace() {
       }
       const transaction = db.transaction(storeName, "readonly");
       const store = transaction.objectStore(storeName);
-      const read = store.get(taskSpaceKey("current"));
+      const read = store.get(myboxKey("current"));
       read.onerror = () => reject(read.error || new Error("Could not read workspace"));
       read.onsuccess = () => {
         if (read.result != null) {
-          resolve(taskSpaceWorkspaceValue(read.result));
+          resolve(myboxWorkspaceValue(read.result));
           return;
         }
-        if (!taskSpaceCanReadLegacyGuest()) {
+        if (!myboxCanReadLegacyGuest()) {
           resolve(null);
           return;
         }
@@ -753,7 +753,7 @@ export function taskSpaceLoadWorkspace() {
         legacy.onerror = () => reject(legacy.error || new Error("Could not read legacy workspace"));
         legacy.onsuccess = () => {
           if (legacy.result != null) {
-            resolve(taskSpaceWorkspaceValue(legacy.result));
+            resolve(myboxWorkspaceValue(legacy.result));
             return;
           }
           resolve(null);
@@ -763,15 +763,15 @@ export function taskSpaceLoadWorkspace() {
   });
 }
 
-export function taskSpaceSaveWorkspace(raw, principal) {
+export function myboxSaveWorkspace(raw, principal) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
+    const request = indexedDB.open("mybox", 7);
     request.onupgradeneeded = () => {
-      taskSpaceEnsureStores(request.result);
+      myboxEnsureStores(request.result);
       if (!request.result.objectStoreNames.contains("workspace")) {
         request.result.createObjectStore("workspace");
       }
@@ -790,10 +790,10 @@ export function taskSpaceSaveWorkspace(raw, principal) {
     };
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction("workspace", "readwrite");
       const store = transaction.objectStore("workspace");
-      const key = taskSpaceKeyFor(principal, "current");
+      const key = myboxKeyFor(principal, "current");
       const read = store.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read workspace"));
       read.onsuccess = () => {
@@ -801,31 +801,31 @@ export function taskSpaceSaveWorkspace(raw, principal) {
         // serializes these transactions across tabs; a per-tab counter would
         // let two tabs both write sequence 1 and let a stale physical write
         // replace a newer workspace projection.
-        const previousSequence = taskSpaceSafeCounter(read.result?.writeSequence);
+        const previousSequence = myboxSafeCounter(read.result?.writeSequence);
         const writeSequence = Math.min(Number.MAX_SAFE_INTEGER, previousSequence + 1);
         if (writeSequence >= previousSequence) {
-          const mergedRaw = taskSpaceMergeWorkspaceRaw(read.result, raw) || raw;
+          const mergedRaw = myboxMergeWorkspaceRaw(read.result, raw) || raw;
           store.put({ raw: mergedRaw, writeSequence }, key);
         }
       };
       transaction.onerror = () => reject(transaction.error || new Error("Could not save workspace"));
       transaction.oncomplete = () => {
-        taskSpaceMarkLegacyGuestMigrated(principal);
+        myboxMarkLegacyGuestMigrated(principal);
         resolve(true);
       };
     };
   });
 }
 
-export function taskSpaceLoadCrdt(spaceId) {
+export function myboxLoadCrdt(spaceId) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
+    const request = indexedDB.open("mybox", 7);
     request.onupgradeneeded = () => {
-      taskSpaceEnsureStores(request.result);
+      myboxEnsureStores(request.result);
       if (!request.result.objectStoreNames.contains("workspace")) {
         request.result.createObjectStore("workspace");
       }
@@ -844,10 +844,10 @@ export function taskSpaceLoadCrdt(spaceId) {
     };
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "crdt"], "readonly");
       const recordRead = transaction.objectStore("sync-records").get(
-        taskSpaceSyncRecordKey(taskSpaceSyncPrincipal, spaceId),
+        myboxSyncRecordKey(myboxSyncPrincipal, spaceId),
       );
       recordRead.onerror = () => reject(recordRead.error || new Error("Could not read sync record"));
       recordRead.onsuccess = () => {
@@ -855,10 +855,10 @@ export function taskSpaceLoadCrdt(spaceId) {
           resolve(recordRead.result.snapshot);
           return;
         }
-        const read = transaction.objectStore("crdt").get(taskSpaceKey(`space:${spaceId}`));
+        const read = transaction.objectStore("crdt").get(myboxKey(`space:${spaceId}`));
         read.onerror = () => reject(read.error || new Error("Could not read CRDT document"));
         read.onsuccess = () => {
-          if (read.result != null || !taskSpaceCanReadLegacyGuest()) {
+          if (read.result != null || !myboxCanReadLegacyGuest()) {
             resolve(read.result ?? null);
             return;
           }
@@ -875,20 +875,20 @@ export function taskSpaceLoadCrdt(spaceId) {
 // still leave the snapshot one generation behind while its delta remains in
 // the durable outbox. Return those deltas separately so the Rust side can
 // replay them into the snapshot before rendering an offline workspace.
-export function taskSpaceLoadCrdtOutbox(spaceId) {
+export function myboxLoadCrdtOutbox(spaceId) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "crdt-updates", "crdt-inbox"], "readonly");
       const recordRead = transaction.objectStore("sync-records").get(
-        taskSpaceSyncRecordKey(taskSpaceSyncPrincipal, spaceId),
+        myboxSyncRecordKey(myboxSyncPrincipal, spaceId),
       );
       const legacyRead = transaction.objectStore("crdt-updates").getAll();
       const inboxRead = transaction.objectStore("crdt-inbox").getAll();
@@ -909,8 +909,8 @@ export function taskSpaceLoadCrdtOutbox(spaceId) {
           .filter((item) => item
             && Number(item.spaceId) === Number(spaceId)
             && typeof item.update === "string"
-            && (item.principal === taskSpaceSyncPrincipal
-            || (taskSpaceIsGuestPrincipal(taskSpaceSyncPrincipal) && item.principal == null)))
+            && (item.principal === myboxSyncPrincipal
+            || (myboxIsGuestPrincipal(myboxSyncPrincipal) && item.principal == null)))
           .map((item) => item.update);
         const seen = new Set(current);
         const merged = current.concat(fallback.filter((update) => {
@@ -920,7 +920,7 @@ export function taskSpaceLoadCrdtOutbox(spaceId) {
         }));
         const inboxKeys = [];
         for (const item of (inbox || [])) {
-          if (item?.principal !== taskSpaceSyncPrincipal
+          if (item?.principal !== myboxSyncPrincipal
             || Number(item.spaceId) !== Number(spaceId)
             || typeof item.update !== "string") continue;
           if (typeof item.key === "string") inboxKeys.push(item.key);
@@ -940,18 +940,18 @@ export function taskSpaceLoadCrdtOutbox(spaceId) {
   });
 }
 
-function taskSpaceIncomingCrdtKey(principal, spaceId, originDeviceId, localGeneration) {
+function myboxIncomingCrdtKey(principal, spaceId, originDeviceId, localGeneration) {
   const source = String(originDeviceId || "unknown");
-  const generation = taskSpaceSafeCounter(localGeneration);
-  return taskSpaceKeyFor(
+  const generation = myboxSafeCounter(localGeneration);
+  return myboxKeyFor(
     principal,
     `inbox:${Number(spaceId)}:${source}:${generation}`,
   );
 }
 
-function taskSpaceDeleteIncomingCrdtKeys(transaction, principal, keys) {
+function myboxDeleteIncomingCrdtKeys(transaction, principal, keys) {
   const inbox = transaction.objectStore("crdt-inbox");
-  const prefix = taskSpaceKeyFor(principal, "inbox:");
+  const prefix = myboxKeyFor(principal, "inbox:");
   for (const key of Array.isArray(keys) ? keys : []) {
     if (typeof key === "string" && key.startsWith(prefix)) inbox.delete(key);
   }
@@ -961,7 +961,7 @@ function taskSpaceDeleteIncomingCrdtKeys(transaction, principal, keys) {
 // after this row is durable. The inbox is not an upload queue: it is replayed
 // when hydrating the canonical document and only the exact row covered by a
 // successful merged snapshot transaction may be removed.
-export function taskSpaceQueueIncomingCrdtUpdate(
+export function myboxQueueIncomingCrdtUpdate(
   principal,
   spaceId,
   originDeviceId,
@@ -973,15 +973,15 @@ export function taskSpaceQueueIncomingCrdtUpdate(
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction("crdt-inbox", "readwrite");
       const source = String(originDeviceId || "unknown");
-      const generation = taskSpaceSafeCounter(localGeneration);
-      const key = taskSpaceIncomingCrdtKey(principal, spaceId, source, generation);
+      const generation = myboxSafeCounter(localGeneration);
+      const key = myboxIncomingCrdtKey(principal, spaceId, source, generation);
       transaction.objectStore("crdt-inbox").put({
         key,
         principal: String(principal || "guest"),
@@ -996,7 +996,7 @@ export function taskSpaceQueueIncomingCrdtUpdate(
   });
 }
 
-export function taskSpaceSaveCrdt(
+export function myboxSaveCrdt(
   principal,
   spaceId,
   encodedSnapshot,
@@ -1004,16 +1004,16 @@ export function taskSpaceSaveCrdt(
   originDeviceId = "",
   originGeneration = 0,
 ) {
-  const writeSequence = taskSpaceNextCrdtWriteSequence(principal, spaceId);
-  const suppliedGeneration = taskSpaceSafeCounter(snapshotGeneration);
+  const writeSequence = myboxNextCrdtWriteSequence(principal, spaceId);
+  const suppliedGeneration = myboxSafeCounter(snapshotGeneration);
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
+    const request = indexedDB.open("mybox", 7);
     request.onupgradeneeded = () => {
-      taskSpaceEnsureStores(request.result);
+      myboxEnsureStores(request.result);
       if (!request.result.objectStoreNames.contains("workspace")) {
         request.result.createObjectStore("workspace");
       }
@@ -1032,24 +1032,24 @@ export function taskSpaceSaveCrdt(
     };
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "crdt", "crdt-inbox"], "readwrite");
       const records = transaction.objectStore("sync-records");
       const inbox = transaction.objectStore("crdt-inbox");
-      const key = taskSpaceSyncRecordKey(principal, spaceId);
+      const key = myboxSyncRecordKey(principal, spaceId);
       const read = records.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read sync record"));
       read.onsuccess = () => {
-        const record = read.result || taskSpaceEmptySyncRecord(principal, spaceId);
-        const currentGeneration = taskSpaceSafeCounter(record.localGeneration);
-        const previousSequence = taskSpaceSafeCounter(record.snapshotWriteSequence);
+        const record = read.result || myboxEmptySyncRecord(principal, spaceId);
+        const currentGeneration = myboxSafeCounter(record.localGeneration);
+        const previousSequence = myboxSafeCounter(record.snapshotWriteSequence);
         // A direct snapshot mirror is allowed to replace the record only
         // when its caller supplies the shared generation from the originating
         // atomic transaction. Equal generations are allowed because a sibling
         // tab may have merged an inbox delta into the same-generation
         // snapshot; the inbox transaction below makes that merge durable.
         // Unversioned writes are retained only for first-time initialization;
-        // normal local edits use taskSpaceQueueCrdtUpdate as the authority.
+        // normal local edits use myboxQueueCrdtUpdate as the authority.
         const canWriteSnapshot = suppliedGeneration > 0
           ? suppliedGeneration >= currentGeneration
           : record.snapshot == null && currentGeneration === 0;
@@ -1061,9 +1061,9 @@ export function taskSpaceSaveCrdt(
           // not clear the whole space inbox: unrelated messages can already
           // be durable there but not yet merged into this snapshot.
           const origin = String(originDeviceId || "").trim();
-          const generation = taskSpaceSafeCounter(originGeneration);
+          const generation = myboxSafeCounter(originGeneration);
           if (origin && generation > 0) {
-            inbox.delete(taskSpaceIncomingCrdtKey(principal, spaceId, origin, generation));
+            inbox.delete(myboxIncomingCrdtKey(principal, spaceId, origin, generation));
           }
         }
         records.put(record, key);
@@ -1072,7 +1072,7 @@ export function taskSpaceSaveCrdt(
         // incoming value unconditionally would reintroduce a stale fallback
         // for older clients/readers.
         if (record.snapshot != null) {
-          transaction.objectStore("crdt").put(record.snapshot, taskSpaceKeyFor(principal, `space:${spaceId}`));
+          transaction.objectStore("crdt").put(record.snapshot, myboxKeyFor(principal, `space:${spaceId}`));
         }
       };
       transaction.onerror = () => reject(transaction.error || new Error("Could not save CRDT document"));
@@ -1081,16 +1081,16 @@ export function taskSpaceSaveCrdt(
   });
 }
 
-export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceId, lastServerSequence, stateVector, encodedUpdate, encodedSnapshot, localGeneration, workspaceRaw) {
-  const writeSequence = taskSpaceNextCrdtWriteSequence(principal, spaceId);
+export function myboxQueueCrdtUpdate(principal, spaceId, mutationId, deviceId, lastServerSequence, stateVector, encodedUpdate, encodedSnapshot, localGeneration, workspaceRaw) {
+  const writeSequence = myboxNextCrdtWriteSequence(principal, spaceId);
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
+    const request = indexedDB.open("mybox", 7);
     request.onupgradeneeded = () => {
-      taskSpaceEnsureStores(request.result);
+      myboxEnsureStores(request.result);
       if (!request.result.objectStoreNames.contains("workspace")) {
         request.result.createObjectStore("workspace");
       }
@@ -1109,18 +1109,18 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
     };
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "crdt-updates", "sync-state", "crdt", "workspace"], "readwrite");
-      const generationKey = taskSpaceKeyFor(principal, `generation:${spaceId}`);
+      const generationKey = myboxKeyFor(principal, `generation:${spaceId}`);
       const generationStore = transaction.objectStore("sync-state");
       const records = transaction.objectStore("sync-records");
       const workspaceStore = transaction.objectStore("workspace");
-      const recordKey = taskSpaceSyncRecordKey(principal, spaceId);
+      const recordKey = myboxSyncRecordKey(principal, spaceId);
       const recordRead = records.get(recordKey);
       const generationRead = generationStore.get(generationKey);
       const workspaceRead = workspaceRaw == null
         ? null
-        : workspaceStore.get(taskSpaceKeyFor(principal, "current"));
+        : workspaceStore.get(myboxKeyFor(principal, "current"));
       let recordReady = false;
       let generationReady = false;
       let workspaceReady = workspaceRead == null;
@@ -1133,12 +1133,12 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
       }
       const maybeWrite = () => {
         if (!recordReady || !generationReady || !workspaceReady) return;
-        const record = recordRead.result || taskSpaceEmptySyncRecord(principal, spaceId);
+        const record = recordRead.result || myboxEmptySyncRecord(principal, spaceId);
         const current = Math.max(
-          taskSpaceSafeCounter(record.localGeneration),
-          taskSpaceSafeCounter(generationRead.result),
+          myboxSafeCounter(record.localGeneration),
+          myboxSafeCounter(generationRead.result),
         );
-        const suppliedGeneration = taskSpaceSafeCounter(localGeneration);
+        const suppliedGeneration = myboxSafeCounter(localGeneration);
         // Every queued local mutation receives a strictly newer generation in
         // the atomic record. This also covers two tabs that race before their
         // localStorage counters become visible to one another.
@@ -1152,7 +1152,7 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
         const entry = {
           mutationId,
           deviceId: String(deviceId || ""),
-          lastServerSequence: taskSpaceSafeCounter(lastServerSequence),
+          lastServerSequence: myboxSafeCounter(lastServerSequence),
           stateVector,
           update: encodedUpdate,
           localGeneration: next,
@@ -1161,17 +1161,17 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
         const nextOutbox = outbox.filter((item) => item?.mutationId !== mutationId).concat(entry);
         const outboxStore = transaction.objectStore("crdt-updates");
         let persistedOutbox = nextOutbox;
-        const recoveryRequested = nextOutbox.length > taskSpaceMaxOutboxEntries
-          || taskSpaceOutboxBytes(nextOutbox) > taskSpaceMaxOutboxBytes;
+        const recoveryRequested = nextOutbox.length > myboxMaxOutboxEntries
+          || myboxOutboxBytes(nextOutbox) > myboxMaxOutboxBytes;
         const recoveryFitsServer = String(encodedSnapshot || "").length
-          <= taskSpaceMaxRecoveryEnvelopeChars;
+          <= myboxMaxRecoveryEnvelopeChars;
         if (recoveryRequested && recoveryFitsServer) {
           // A full snapshot is a safe recovery envelope: applying it to the
           // server's Yrs document merges every local operation without
           // resurrecting server-only operations. Replace the individual
           // mutations with one fresh id so an already-committed request can
           // never be retried under a different payload.
-          const recoveryMutationId = taskSpaceRecoveryMutationId();
+          const recoveryMutationId = myboxRecoveryMutationId();
           const queuedTimestamps = nextOutbox
             .map((item) => Number(item?.createdAt))
             .filter((value) => Number.isSafeInteger(value) && value > 0);
@@ -1180,7 +1180,7 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
             spaceId,
             mutationId: recoveryMutationId,
             deviceId: String(deviceId || ""),
-            lastServerSequence: taskSpaceSafeCounter(lastServerSequence),
+            lastServerSequence: myboxSafeCounter(lastServerSequence),
             stateVector: "",
             update: encodedSnapshot,
             localGeneration: next,
@@ -1188,7 +1188,7 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
           };
           for (const item of outbox) {
             if (item?.mutationId) {
-              outboxStore.delete(taskSpaceKeyFor(principal, `${spaceId}:${item.mutationId}`));
+              outboxStore.delete(myboxKeyFor(principal, `${spaceId}:${item.mutationId}`));
               // Remove the pre-v6 unscoped copy as well. The fallback reader
               // still exposes that key until an acknowledged mutation clears
               // it, and retaining it here could replay superseded deltas
@@ -1198,7 +1198,7 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
           }
           outboxStore.put(
             recoveryEntry,
-            taskSpaceKeyFor(principal, `${spaceId}:${recoveryMutationId}`),
+            myboxKeyFor(principal, `${spaceId}:${recoveryMutationId}`),
           );
           persistedOutbox = [recoveryEntry];
         }
@@ -1222,12 +1222,12 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
         generationStore.put(next, generationKey);
         if (persistedOutbox === nextOutbox) {
           outboxStore.put(
-            { principal: String(principal || "guest"), spaceId, mutationId, deviceId: String(deviceId || ""), lastServerSequence: taskSpaceSafeCounter(lastServerSequence), stateVector, update: encodedUpdate, localGeneration: next, createdAt, snapshot: encodedSnapshot },
-            taskSpaceKeyFor(principal, `${spaceId}:${mutationId}`),
+            { principal: String(principal || "guest"), spaceId, mutationId, deviceId: String(deviceId || ""), lastServerSequence: myboxSafeCounter(lastServerSequence), stateVector, update: encodedUpdate, localGeneration: next, createdAt, snapshot: encodedSnapshot },
+            myboxKeyFor(principal, `${spaceId}:${mutationId}`),
           );
         }
         if (record.snapshot != null) {
-          transaction.objectStore("crdt").put(record.snapshot, taskSpaceKeyFor(principal, `space:${spaceId}`));
+          transaction.objectStore("crdt").put(record.snapshot, myboxKeyFor(principal, `space:${spaceId}`));
         }
         if (workspaceRaw != null) {
           // Do not let a tab that queued an older local generation replace a
@@ -1235,17 +1235,17 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
           // still committed regardless; the projection will be regenerated
           // when the newer generation is observed or reconciled.
           if (suppliedGeneration > current || current === 0) {
-            const previousWorkspaceSequence = taskSpaceSafeCounter(workspaceRead?.result?.writeSequence);
+            const previousWorkspaceSequence = myboxSafeCounter(workspaceRead?.result?.writeSequence);
             const workspaceWriteSequence = Math.min(
               Number.MAX_SAFE_INTEGER,
               previousWorkspaceSequence + 1,
             );
             workspaceStore.put(
               {
-                raw: taskSpaceMergeWorkspaceRaw(workspaceRead?.result, workspaceRaw) || workspaceRaw,
+                raw: myboxMergeWorkspaceRaw(workspaceRead?.result, workspaceRaw) || workspaceRaw,
                 writeSequence: workspaceWriteSequence,
               },
-              taskSpaceKeyFor(principal, "current"),
+              myboxKeyFor(principal, "current"),
             );
           }
         }
@@ -1263,7 +1263,7 @@ export function taskSpaceQueueCrdtUpdate(principal, spaceId, mutationId, deviceI
 // crash between two writes can make a later tab diff against the wrong
 // server state. A local generation created while the request was in flight
 // keeps the newer snapshot and leaves its outbox entry recoverable.
-export function taskSpaceCommitCrdtPull(
+export function myboxCommitCrdtPull(
   principal,
   spaceId,
   encodedSnapshot,
@@ -1271,7 +1271,7 @@ export function taskSpaceCommitCrdtPull(
   localGeneration,
   inboxKeysJson = "[]",
 ) {
-  const writeSequence = taskSpaceNextCrdtWriteSequence(principal, spaceId);
+  const writeSequence = myboxNextCrdtWriteSequence(principal, spaceId);
   let inboxKeys = [];
   try {
     const parsed = JSON.parse(String(inboxKeysJson || "[]"));
@@ -1282,21 +1282,21 @@ export function taskSpaceCommitCrdtPull(
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "sync-state", "crdt", "crdt-inbox"], "readwrite");
       const records = transaction.objectStore("sync-records");
-      const key = taskSpaceSyncRecordKey(principal, spaceId);
+      const key = myboxSyncRecordKey(principal, spaceId);
       const read = records.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read sync record"));
       read.onsuccess = () => {
-        const record = read.result || taskSpaceEmptySyncRecord(principal, spaceId);
-        const currentGeneration = taskSpaceSafeCounter(record.localGeneration);
-        const requestedGeneration = taskSpaceSafeCounter(localGeneration);
-        const previousSequence = taskSpaceSafeCounter(record.snapshotWriteSequence);
+        const record = read.result || myboxEmptySyncRecord(principal, spaceId);
+        const currentGeneration = myboxSafeCounter(record.localGeneration);
+        const requestedGeneration = myboxSafeCounter(localGeneration);
+        const previousSequence = myboxSafeCounter(record.snapshotWriteSequence);
         const keepNewerLocalSnapshot = currentGeneration > requestedGeneration
           || writeSequence < previousSequence;
         const snapshot = keepNewerLocalSnapshot && record.snapshot != null
@@ -1306,15 +1306,15 @@ export function taskSpaceCommitCrdtPull(
         if (!keepNewerLocalSnapshot) record.snapshotWriteSequence = writeSequence;
         record.acknowledgedStateVector = stateVector;
         record.acknowledgedGeneration = Math.max(
-          taskSpaceSafeCounter(record.acknowledgedGeneration),
+          myboxSafeCounter(record.acknowledgedGeneration),
           Math.min(requestedGeneration, currentGeneration),
         );
         record.lastError = null;
         records.put(record, key);
-        transaction.objectStore("crdt").put(snapshot, taskSpaceKeyFor(principal, `space:${spaceId}`));
-        transaction.objectStore("sync-state").put(stateVector, taskSpaceKeyFor(principal, `space:${spaceId}`));
+        transaction.objectStore("crdt").put(snapshot, myboxKeyFor(principal, `space:${spaceId}`));
+        transaction.objectStore("sync-state").put(stateVector, myboxKeyFor(principal, `space:${spaceId}`));
         if (snapshot === encodedSnapshot) {
-          taskSpaceDeleteIncomingCrdtKeys(transaction, principal, inboxKeys);
+          myboxDeleteIncomingCrdtKeys(transaction, principal, inboxKeys);
         }
       };
       transaction.onerror = () => reject(transaction.error || new Error("Could not commit pull"));
@@ -1326,32 +1326,32 @@ export function taskSpaceCommitCrdtPull(
 // Commit an already-applied SSE delta without making another network pull.
 // The event cursor is advanced only after this transaction succeeds, so a
 // crash before the write completes safely replays the durable server event.
-export function taskSpaceCommitCrdtEvent(
+export function myboxCommitCrdtEvent(
   principal,
   spaceId,
   encodedSnapshot,
   stateVector,
 ) {
-  const writeSequence = taskSpaceNextCrdtWriteSequence(principal, spaceId);
+  const writeSequence = myboxNextCrdtWriteSequence(principal, spaceId);
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "sync-state", "crdt"], "readwrite");
       const records = transaction.objectStore("sync-records");
-      const key = taskSpaceSyncRecordKey(principal, spaceId);
+      const key = myboxSyncRecordKey(principal, spaceId);
       let accepted = false;
       const read = records.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read sync record"));
       read.onsuccess = () => {
-        const record = read.result || taskSpaceEmptySyncRecord(principal, spaceId);
-        const previousSequence = taskSpaceSafeCounter(record.snapshotWriteSequence);
+        const record = read.result || myboxEmptySyncRecord(principal, spaceId);
+        const previousSequence = myboxSafeCounter(record.snapshotWriteSequence);
         accepted = writeSequence >= previousSequence;
         // A local write that was already scheduled owns a newer snapshot
         // sequence. Do not let an SSE projection clobber that local snapshot;
@@ -1364,11 +1364,11 @@ export function taskSpaceCommitCrdtEvent(
           records.put(record, key);
           transaction.objectStore("crdt").put(
             encodedSnapshot,
-            taskSpaceKeyFor(principal, `space:${spaceId}`),
+            myboxKeyFor(principal, `space:${spaceId}`),
           );
           transaction.objectStore("sync-state").put(
             stateVector,
-            taskSpaceKeyFor(principal, `space:${spaceId}`),
+            myboxKeyFor(principal, `space:${spaceId}`),
           );
         }
       };
@@ -1378,26 +1378,26 @@ export function taskSpaceCommitCrdtEvent(
   });
 }
 
-export function taskSpaceSaveSyncState(principal, spaceId, stateVector) {
+export function myboxSaveSyncState(principal, spaceId, stateVector) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "sync-state"], "readwrite");
       const records = transaction.objectStore("sync-records");
-      const key = taskSpaceSyncRecordKey(principal, spaceId);
+      const key = myboxSyncRecordKey(principal, spaceId);
       const read = records.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read sync record"));
       read.onsuccess = () => {
-        const record = read.result || taskSpaceEmptySyncRecord(principal, spaceId);
+        const record = read.result || myboxEmptySyncRecord(principal, spaceId);
         record.acknowledgedStateVector = stateVector;
         records.put(record, key);
-        transaction.objectStore("sync-state").put(stateVector, taskSpaceKeyFor(principal, `space:${spaceId}`));
+        transaction.objectStore("sync-state").put(stateVector, myboxKeyFor(principal, `space:${spaceId}`));
       };
       transaction.onerror = () => reject(transaction.error || new Error("Could not save sync state"));
       transaction.oncomplete = () => resolve(true);
@@ -1406,19 +1406,19 @@ export function taskSpaceSaveSyncState(principal, spaceId, stateVector) {
   });
 }
 
-export function taskSpaceLoadSyncState(principal, spaceId) {
+export function myboxLoadSyncState(principal, spaceId) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "sync-state"], "readonly");
       const recordRead = transaction.objectStore("sync-records").get(
-        taskSpaceSyncRecordKey(principal, spaceId),
+        myboxSyncRecordKey(principal, spaceId),
       );
       recordRead.onerror = () => reject(recordRead.error || new Error("Could not read sync record"));
       recordRead.onsuccess = () => {
@@ -1426,7 +1426,7 @@ export function taskSpaceLoadSyncState(principal, spaceId) {
           resolve(recordRead.result.acknowledgedStateVector);
           return;
         }
-        const read = transaction.objectStore("sync-state").get(taskSpaceKeyFor(principal, `space:${spaceId}`));
+        const read = transaction.objectStore("sync-state").get(myboxKeyFor(principal, `space:${spaceId}`));
         read.onerror = () => reject(read.error || new Error("Could not read sync state"));
         read.onsuccess = () => resolve(read.result ?? null);
       };
@@ -1435,16 +1435,16 @@ export function taskSpaceLoadSyncState(principal, spaceId) {
   });
 }
 
-export function taskSpaceLoadCrdtUpdates() {
+export function myboxLoadCrdtUpdates() {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "crdt-updates"], "readonly");
       const recordsRead = transaction.objectStore("sync-records").getAll();
       const legacyRead = transaction.objectStore("crdt-updates").getAll();
@@ -1455,7 +1455,7 @@ export function taskSpaceLoadCrdtUpdates() {
       const finish = () => {
         if (!recordsReady || !legacyReady) return;
         const current = (records || [])
-          .filter((record) => record?.principal === taskSpaceSyncPrincipal)
+          .filter((record) => record?.principal === myboxSyncPrincipal)
           .flatMap((record) => {
             const outbox = Array.isArray(record.outbox)
               ? record.outbox.map((item) => ({
@@ -1465,8 +1465,8 @@ export function taskSpaceLoadCrdtUpdates() {
               }))
               : [];
             if (outbox.length > 0) return outbox;
-            const localGeneration = taskSpaceSafeCounter(record.localGeneration);
-            const acknowledgedGeneration = taskSpaceSafeCounter(record.acknowledgedGeneration);
+            const localGeneration = myboxSafeCounter(record.localGeneration);
+            const acknowledgedGeneration = myboxSafeCounter(record.acknowledgedGeneration);
             if (localGeneration <= acknowledgedGeneration) return [];
             // The snapshot is the self-healing source of truth when an older
             // per-mutation outbox row was lost. A stable recovery mutation id
@@ -1486,11 +1486,11 @@ export function taskSpaceLoadCrdtUpdates() {
           && typeof item.spaceId === "number"
           && typeof item.mutationId === "string"
           && !currentKeys.has(`${item.spaceId}:${item.mutationId}`)
-          && (item.principal === taskSpaceSyncPrincipal
+          && (item.principal === myboxSyncPrincipal
             // Legacy outbox rows remain readable until they are explicitly
             // acknowledged under the namespaced key. A workspace migration
             // marker must not hide a queue entry before its first retry.
-            || (taskSpaceIsGuestPrincipal(taskSpaceSyncPrincipal) && item.principal == null)),
+            || (myboxIsGuestPrincipal(myboxSyncPrincipal) && item.principal == null)),
         );
         resolve(current.concat(fallback));
       };
@@ -1503,23 +1503,23 @@ export function taskSpaceLoadCrdtUpdates() {
   });
 }
 
-export function taskSpaceLoadSyncErrors() {
+export function myboxLoadSyncErrors() {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const read = db.transaction("sync-records", "readonly")
         .objectStore("sync-records")
         .getAll();
       read.onerror = () => reject(read.error || new Error("Could not read sync errors"));
       read.onsuccess = () => resolve((read.result || [])
-        .filter((record) => record?.principal === taskSpaceSyncPrincipal
+        .filter((record) => record?.principal === myboxSyncPrincipal
           && typeof record.lastError === "string"
           && record.lastError.length > 0)
         .map((record) => ({
@@ -1530,25 +1530,25 @@ export function taskSpaceLoadSyncErrors() {
   });
 }
 
-export function taskSpaceLoadSyncDiagnostics(principal, spaceId) {
+export function myboxLoadSyncDiagnostics(principal, spaceId) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const principalValue = String(principal || taskSpaceSyncPrincipal || "guest");
+    const principalValue = String(principal || myboxSyncPrincipal || "guest");
     const numericSpaceId = Number(spaceId);
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(
         ["sync-records", "metadata-updates", "crdt-inbox", "crdt-updates"],
         "readonly",
       );
       const recordRead = transaction.objectStore("sync-records").get(
-        taskSpaceSyncRecordKey(principalValue, numericSpaceId),
+        myboxSyncRecordKey(principalValue, numericSpaceId),
       );
       const metadataRead = transaction.objectStore("metadata-updates").getAll();
       const inboxRead = transaction.objectStore("crdt-inbox").getAll();
@@ -1567,7 +1567,7 @@ export function taskSpaceLoadSyncDiagnostics(principal, spaceId) {
           && Number(item.spaceId) === numericSpaceId
           && typeof item.update === "string"
           && (item.principal === principalValue
-            || (taskSpaceIsGuestPrincipal(principalValue) && item.principal == null)));
+            || (myboxIsGuestPrincipal(principalValue) && item.principal == null)));
         const metadataQueue = (metadata || []).filter((item) => item
           && item.principal === principalValue
           && Number(item.spaceId) === numericSpaceId);
@@ -1581,8 +1581,8 @@ export function taskSpaceLoadSyncDiagnostics(principal, spaceId) {
           .filter((value) => Number.isSafeInteger(value) && value > 0);
         resolve({
           dbVersion: Number(db.version) || 0,
-          localGeneration: taskSpaceSafeCounter(record?.localGeneration),
-          acknowledgedGeneration: taskSpaceSafeCounter(record?.acknowledgedGeneration),
+          localGeneration: myboxSafeCounter(record?.localGeneration),
+          acknowledgedGeneration: myboxSafeCounter(record?.acknowledgedGeneration),
           outboxCount: recordOutbox.length + legacyOutbox.length,
           outboxBytes: recordOutbox.concat(legacyOutbox).reduce((total, item) => total
             + String(item.stateVector || "").length
@@ -1605,19 +1605,19 @@ export function taskSpaceLoadSyncDiagnostics(principal, spaceId) {
   });
 }
 
-export function taskSpaceAckCrdtUpdate(principal, spaceId, mutationId) {
+export function myboxAckCrdtUpdate(principal, spaceId, mutationId) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "crdt-updates"], "readwrite");
       const records = transaction.objectStore("sync-records");
-      const key = taskSpaceSyncRecordKey(principal, spaceId);
+      const key = myboxSyncRecordKey(principal, spaceId);
       const read = records.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read sync record"));
       read.onsuccess = () => {
@@ -1628,7 +1628,7 @@ export function taskSpaceAckCrdtUpdate(principal, spaceId, mutationId) {
           records.put(record, key);
         }
         const updates = transaction.objectStore("crdt-updates");
-        updates.delete(taskSpaceKeyFor(principal, `${spaceId}:${mutationId}`));
+        updates.delete(myboxKeyFor(principal, `${spaceId}:${mutationId}`));
         // Older versions used an unscoped `space:mutation` key. Remove that
         // legacy copy only after the server has acknowledged the namespaced
         // request, otherwise it would be replayed forever on every drain.
@@ -1643,7 +1643,7 @@ export function taskSpaceAckCrdtUpdate(principal, spaceId, mutationId) {
   });
 }
 
-export function taskSpaceCommitCrdtReconcile(
+export function myboxCommitCrdtReconcile(
   principal,
   spaceId,
   mutationId,
@@ -1652,7 +1652,7 @@ export function taskSpaceCommitCrdtReconcile(
   acknowledgedGeneration,
   inboxKeysJson = "[]",
 ) {
-  const writeSequence = taskSpaceNextCrdtWriteSequence(principal, spaceId);
+  const writeSequence = myboxNextCrdtWriteSequence(principal, spaceId);
   let inboxKeys = [];
   try {
     const parsed = JSON.parse(String(inboxKeysJson || "[]"));
@@ -1663,21 +1663,21 @@ export function taskSpaceCommitCrdtReconcile(
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       const transaction = db.transaction(["sync-records", "crdt-updates", "sync-state", "crdt", "crdt-inbox"], "readwrite");
       const records = transaction.objectStore("sync-records");
-      const key = taskSpaceSyncRecordKey(principal, spaceId);
+      const key = myboxSyncRecordKey(principal, spaceId);
       const read = records.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read sync record"));
       read.onsuccess = () => {
-        const record = read.result || taskSpaceEmptySyncRecord(principal, spaceId);
-        const localGeneration = taskSpaceSafeCounter(record.localGeneration);
-        const requestedAcknowledgedGeneration = taskSpaceSafeCounter(acknowledgedGeneration);
-        const previousSequence = taskSpaceSafeCounter(record.snapshotWriteSequence);
+        const record = read.result || myboxEmptySyncRecord(principal, spaceId);
+        const localGeneration = myboxSafeCounter(record.localGeneration);
+        const requestedAcknowledgedGeneration = myboxSafeCounter(acknowledgedGeneration);
+        const previousSequence = myboxSafeCounter(record.snapshotWriteSequence);
         // A local edit may commit while the network response is in flight.
         // Its atomic record snapshot is newer than the response snapshot, so
         // never let the older response clobber it. The server only
@@ -1693,22 +1693,22 @@ export function taskSpaceCommitCrdtReconcile(
         }
         record.acknowledgedStateVector = stateVector;
         record.acknowledgedGeneration = Math.max(
-          taskSpaceSafeCounter(record.acknowledgedGeneration),
+          myboxSafeCounter(record.acknowledgedGeneration),
           Math.min(requestedAcknowledgedGeneration, localGeneration),
         );
         record.outbox = (Array.isArray(record.outbox) ? record.outbox : [])
           .filter((item) => item?.mutationId !== mutationId);
         record.lastError = null;
         records.put(record, key);
-        transaction.objectStore("crdt").put(snapshot, taskSpaceKeyFor(principal, `space:${spaceId}`));
-        transaction.objectStore("sync-state").put(stateVector, taskSpaceKeyFor(principal, `space:${spaceId}`));
-        transaction.objectStore("crdt-updates").delete(taskSpaceKeyFor(principal, `${spaceId}:${mutationId}`));
+        transaction.objectStore("crdt").put(snapshot, myboxKeyFor(principal, `space:${spaceId}`));
+        transaction.objectStore("sync-state").put(stateVector, myboxKeyFor(principal, `space:${spaceId}`));
+        transaction.objectStore("crdt-updates").delete(myboxKeyFor(principal, `${spaceId}:${mutationId}`));
         // Also clear the pre-v6 unscoped row after this mutation has been
         // durably acknowledged. Otherwise an authenticated legacy queue row
         // can be rediscovered forever by the migration fallback.
         transaction.objectStore("crdt-updates").delete(`${spaceId}:${mutationId}`);
         if (snapshot === encodedSnapshot) {
-          taskSpaceDeleteIncomingCrdtKeys(transaction, principal, inboxKeys);
+          myboxDeleteIncomingCrdtKeys(transaction, principal, inboxKeys);
         }
       };
       transaction.onerror = () => reject(transaction.error || new Error("Could not commit reconciliation"));
@@ -1717,16 +1717,16 @@ export function taskSpaceCommitCrdtReconcile(
   });
 }
 
-export function taskSpaceQueueMetadataUpdate(principal, spaceId, operationId, operation, name, expectedVersion, workspaceRaw) {
+export function myboxQueueMetadataUpdate(principal, spaceId, operationId, operation, name, expectedVersion, workspaceRaw) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       if (!db.objectStoreNames.contains("metadata-updates")) {
         resolve(false);
         return;
@@ -1737,24 +1737,24 @@ export function taskSpaceQueueMetadataUpdate(principal, spaceId, operationId, op
       const transaction = db.transaction(stores, "readwrite");
       transaction.objectStore("metadata-updates").put(
         { principal: String(principal || "guest"), spaceId, operationId, operation, name, expectedVersion, createdAt: Date.now() },
-        taskSpaceKeyFor(principal, `${spaceId}:${operationId}`),
+        myboxKeyFor(principal, `${spaceId}:${operationId}`),
       );
       if (workspaceRaw != null) {
         const workspace = transaction.objectStore("workspace");
-        const read = workspace.get(taskSpaceKeyFor(principal, "current"));
+        const read = workspace.get(myboxKeyFor(principal, "current"));
         read.onerror = () => reject(read.error || new Error("Could not read workspace"));
         read.onsuccess = () => {
-          const previousSequence = taskSpaceSafeCounter(read.result?.writeSequence);
+          const previousSequence = myboxSafeCounter(read.result?.writeSequence);
           const workspaceWriteSequence = Math.min(
             Number.MAX_SAFE_INTEGER,
             previousSequence + 1,
           );
           workspace.put(
             {
-              raw: taskSpaceMergeWorkspaceRaw(read.result, workspaceRaw) || workspaceRaw,
+              raw: myboxMergeWorkspaceRaw(read.result, workspaceRaw) || workspaceRaw,
               writeSequence: workspaceWriteSequence,
             },
-            taskSpaceKeyFor(principal, "current"),
+            myboxKeyFor(principal, "current"),
           );
         };
       }
@@ -1765,16 +1765,16 @@ export function taskSpaceQueueMetadataUpdate(principal, spaceId, operationId, op
   });
 }
 
-export function taskSpaceLoadMetadataUpdates() {
+export function myboxLoadMetadataUpdates() {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       if (!db.objectStoreNames.contains("metadata-updates")) {
         resolve([]);
         return;
@@ -1782,29 +1782,29 @@ export function taskSpaceLoadMetadataUpdates() {
       const read = db.transaction("metadata-updates", "readonly").objectStore("metadata-updates").getAll();
       read.onerror = () => reject(read.error || new Error("Could not read metadata update queue"));
       read.onsuccess = () => resolve((read.result ?? []).filter((item) =>
-        item && item.principal === taskSpaceSyncPrincipal,
+        item && item.principal === myboxSyncPrincipal,
       ));
     };
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
   });
 }
 
-export function taskSpaceAckMetadataUpdate(principal, spaceId, operationId) {
+export function myboxAckMetadataUpdate(principal, spaceId, operationId) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       if (!db.objectStoreNames.contains("metadata-updates")) {
         resolve(false);
         return;
       }
       const transaction = db.transaction("metadata-updates", "readwrite");
-      transaction.objectStore("metadata-updates").delete(taskSpaceKeyFor(principal, `${spaceId}:${operationId}`));
+      transaction.objectStore("metadata-updates").delete(myboxKeyFor(principal, `${spaceId}:${operationId}`));
       transaction.onerror = () => reject(transaction.error || new Error("Could not acknowledge metadata update"));
       transaction.oncomplete = () => resolve(true);
     };
@@ -1812,9 +1812,9 @@ export function taskSpaceAckMetadataUpdate(principal, spaceId, operationId) {
   });
 }
 
-const taskSpaceSyncSources = new Map();
-const taskSpaceSyncResetTimers = new Map();
-const taskSpaceSyncTransport = {
+const myboxSyncSources = new Map();
+const myboxSyncResetTimers = new Map();
+const myboxSyncTransport = {
   connected: false,
   connections: 0,
   reconnects: 0,
@@ -1824,44 +1824,44 @@ const taskSpaceSyncTransport = {
   lastOpenAt: null,
   lastErrorAt: null,
 };
-const taskSpaceSafetyTimers = new Map();
-const taskSpaceLeaseTimers = new Map();
-const taskSpaceCrdtWriteSequences = new Map();
-const taskSpaceLeaseOwner = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-let taskSpaceBroadcast = null;
-let taskSpaceWebLock = null;
-let taskSpaceWebLockRequest = null;
-const taskSpaceLeaseTokens = new Map();
+const myboxSafetyTimers = new Map();
+const myboxLeaseTimers = new Map();
+const myboxCrdtWriteSequences = new Map();
+const myboxLeaseOwner = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+let myboxBroadcast = null;
+let myboxWebLock = null;
+let myboxWebLockRequest = null;
+const myboxLeaseTokens = new Map();
 
-function taskSpaceNextCrdtWriteSequence(principal, spaceId) {
-  const key = taskSpaceSyncRecordKey(principal, spaceId);
-  const next = (Number(taskSpaceCrdtWriteSequences.get(key)) || 0) + 1;
-  taskSpaceCrdtWriteSequences.set(key, next);
+function myboxNextCrdtWriteSequence(principal, spaceId) {
+  const key = myboxSyncRecordKey(principal, spaceId);
+  const next = (Number(myboxCrdtWriteSequences.get(key)) || 0) + 1;
+  myboxCrdtWriteSequences.set(key, next);
   return next;
 }
 
-function taskSpaceAcquireLocalStorageLease(principal) {
+function myboxAcquireLocalStorageLease(principal) {
   return new Promise((resolve) => {
-    const key = taskSpaceKeyFor(principal, "sync-lease");
+    const key = myboxKeyFor(principal, "sync-lease");
     const now = Date.now();
     let current = null;
     try {
       current = JSON.parse(globalThis.localStorage?.getItem(key) || "null");
     } catch (_) {}
-    if (current && current.expiresAt > now && current.owner !== taskSpaceLeaseOwner) {
+    if (current && current.expiresAt > now && current.owner !== myboxLeaseOwner) {
       resolve(false);
       return;
     }
     const currentEpoch = Number(current?.epoch) || 0;
-    const previousToken = taskSpaceLeaseTokens.get(key);
-    const currentLeaseIsLive = current?.owner === taskSpaceLeaseOwner
+    const previousToken = myboxLeaseTokens.get(key);
+    const currentLeaseIsLive = current?.owner === myboxLeaseOwner
       && Number(current?.expiresAt) > now
       && currentEpoch > 0;
     const epoch = currentLeaseIsLive
       ? currentEpoch
       : Math.max(currentEpoch, Number(previousToken?.epoch) || 0) + 1;
     const lease = {
-      owner: taskSpaceLeaseOwner,
+      owner: myboxLeaseOwner,
       epoch,
       expiresAt: now + 12_000,
     };
@@ -1872,17 +1872,17 @@ function taskSpaceAcquireLocalStorageLease(principal) {
         resolve(false);
         return;
       }
-      taskSpaceLeaseTokens.set(key, lease);
-      if (!taskSpaceLeaseTimers.has(key)) {
-        const timer = setInterval(() => taskSpaceAcquireSyncLease(principal), 4_000);
-        taskSpaceLeaseTimers.set(key, timer);
+      myboxLeaseTokens.set(key, lease);
+      if (!myboxLeaseTimers.has(key)) {
+        const timer = setInterval(() => myboxAcquireSyncLease(principal), 4_000);
+        myboxLeaseTimers.set(key, timer);
       }
       resolve(true);
     } catch (_) {
       // Private browsing/storage-disabled environments must still sync; the
       // server-side mutation idempotency guard is the fallback coordinator.
-      taskSpaceLeaseTokens.set(key, {
-        owner: taskSpaceLeaseOwner,
+      myboxLeaseTokens.set(key, {
+        owner: myboxLeaseOwner,
         epoch,
         expiresAt: Number.POSITIVE_INFINITY,
         storageDisabled: true,
@@ -1892,11 +1892,11 @@ function taskSpaceAcquireLocalStorageLease(principal) {
   });
 }
 
-function taskSpaceWebLockIsCurrent(principal) {
+function myboxWebLockIsCurrent(principal) {
   const normalizedPrincipal = String(principal || "guest");
-  if (taskSpaceWebLock?.principal !== normalizedPrincipal) return false;
-  const key = taskSpaceKeyFor(normalizedPrincipal, "sync-lease");
-  const token = taskSpaceLeaseTokens.get(key);
+  if (myboxWebLock?.principal !== normalizedPrincipal) return false;
+  const key = myboxKeyFor(normalizedPrincipal, "sync-lease");
+  const token = myboxLeaseTokens.get(key);
   // When storage is unavailable, the Web Lock and server-side mutation
   // idempotency are the only available fence. In storage-capable profiles,
   // the expiring lease below is what lets another tab recover from a
@@ -1912,36 +1912,36 @@ function taskSpaceWebLockIsCurrent(principal) {
   }
 }
 
-function taskSpaceReleaseWebLock(principal) {
-  if (taskSpaceWebLock?.principal !== String(principal || "guest")) return;
-  const release = taskSpaceWebLock.release;
-  taskSpaceWebLock = null;
+function myboxReleaseWebLock(principal) {
+  if (myboxWebLock?.principal !== String(principal || "guest")) return;
+  const release = myboxWebLock.release;
+  myboxWebLock = null;
   if (typeof release === "function") release();
 }
 
-function taskSpaceAcquireWebLock(principal) {
+function myboxAcquireWebLock(principal) {
   const locks = globalThis.navigator?.locks;
   if (!locks || typeof locks.request !== "function") return null;
   const normalizedPrincipal = String(principal || "guest");
-  if (taskSpaceWebLock?.principal === normalizedPrincipal) {
+  if (myboxWebLock?.principal === normalizedPrincipal) {
     // Renew the expiring lease even when the Web Lock is already held. If a
     // different tab acquired the lease after this tab was suspended, this
     // resolves false and the stale holder releases its Web Lock below.
-    return taskSpaceAcquireLocalStorageLease(normalizedPrincipal).then((owned) => {
-      if (!owned) taskSpaceReleaseWebLock(normalizedPrincipal);
+    return myboxAcquireLocalStorageLease(normalizedPrincipal).then((owned) => {
+      if (!owned) myboxReleaseWebLock(normalizedPrincipal);
       return owned;
     });
   }
-  if (taskSpaceWebLockRequest?.principal === normalizedPrincipal) {
-    return taskSpaceWebLockRequest.promise;
+  if (myboxWebLockRequest?.principal === normalizedPrincipal) {
+    return myboxWebLockRequest.promise;
   }
 
   let settle;
   const promise = new Promise((resolve) => { settle = resolve; });
-  taskSpaceWebLockRequest = { principal: normalizedPrincipal, promise };
+  myboxWebLockRequest = { principal: normalizedPrincipal, promise };
   try {
     locks.request(
-      `task-space-sync:${normalizedPrincipal}`,
+      `mybox-sync:${normalizedPrincipal}`,
       { mode: "exclusive", ifAvailable: true },
       (lock) => {
         if (!lock) {
@@ -1950,70 +1950,70 @@ function taskSpaceAcquireWebLock(principal) {
         }
         let release;
         const hold = new Promise((resolve) => { release = resolve; });
-        taskSpaceWebLock = { principal: normalizedPrincipal, release };
+        myboxWebLock = { principal: normalizedPrincipal, release };
         // A Web Lock by itself has no expiry: a suspended document can keep
         // it forever. Pair it with the renewable local-storage lease so a
         // different tab can take over after the heartbeat expires.
-        taskSpaceAcquireLocalStorageLease(normalizedPrincipal).then((owned) => {
-          if (!owned) taskSpaceReleaseWebLock(normalizedPrincipal);
+        myboxAcquireLocalStorageLease(normalizedPrincipal).then((owned) => {
+          if (!owned) myboxReleaseWebLock(normalizedPrincipal);
           settle(owned);
         });
         return hold;
       },
     ).catch(() => {
-      if (taskSpaceWebLockRequest?.promise === promise) {
-        taskSpaceWebLockRequest = null;
-        taskSpaceAcquireLocalStorageLease(normalizedPrincipal).then(settle);
+      if (myboxWebLockRequest?.promise === promise) {
+        myboxWebLockRequest = null;
+        myboxAcquireLocalStorageLease(normalizedPrincipal).then(settle);
       }
     });
   } catch (_) {
-    if (taskSpaceWebLockRequest?.promise === promise) {
-      taskSpaceWebLockRequest = null;
-      taskSpaceAcquireLocalStorageLease(normalizedPrincipal).then(settle);
+    if (myboxWebLockRequest?.promise === promise) {
+      myboxWebLockRequest = null;
+      myboxAcquireLocalStorageLease(normalizedPrincipal).then(settle);
     }
   }
   promise.then(() => {
-    if (taskSpaceWebLockRequest?.promise === promise) taskSpaceWebLockRequest = null;
+    if (myboxWebLockRequest?.promise === promise) myboxWebLockRequest = null;
   });
   return promise;
 }
 
-export function taskSpaceAcquireSyncLease(principal) {
-  const webLock = taskSpaceAcquireWebLock(principal);
-  if (!webLock) return taskSpaceAcquireLocalStorageLease(principal);
+export function myboxAcquireSyncLease(principal) {
+  const webLock = myboxAcquireWebLock(principal);
+  if (!webLock) return myboxAcquireLocalStorageLease(principal);
   // `ifAvailable` can report no Web Lock while a suspended tab still holds
   // it. The expiring storage lease remains the liveness fallback in that
   // case; temporary dual coordinators are harmless because mutation claims
   // make server effects idempotent.
-  return webLock.then((owned) => owned || taskSpaceAcquireLocalStorageLease(principal));
+  return webLock.then((owned) => owned || myboxAcquireLocalStorageLease(principal));
 }
 
-export function taskSpaceReleaseSyncLease(principal) {
-  const key = taskSpaceKeyFor(principal, "sync-lease");
-  taskSpaceLeaseTokens.delete(key);
-  const timer = taskSpaceLeaseTimers.get(key);
+export function myboxReleaseSyncLease(principal) {
+  const key = myboxKeyFor(principal, "sync-lease");
+  myboxLeaseTokens.delete(key);
+  const timer = myboxLeaseTimers.get(key);
   if (timer) {
     clearInterval(timer);
-    taskSpaceLeaseTimers.delete(key);
+    myboxLeaseTimers.delete(key);
   }
-  taskSpaceReleaseWebLock(principal);
+  myboxReleaseWebLock(principal);
   try {
     const current = JSON.parse(globalThis.localStorage?.getItem(key) || "null");
-    if (current?.owner === taskSpaceLeaseOwner) globalThis.localStorage?.removeItem(key);
+    if (current?.owner === myboxLeaseOwner) globalThis.localStorage?.removeItem(key);
   } catch (_) {}
 }
 
-export function taskSpaceIsSyncLeaseOwner(principal) {
+export function myboxIsSyncLeaseOwner(principal) {
   const normalizedPrincipal = String(principal || "guest");
-  if (taskSpaceWebLock?.principal === normalizedPrincipal) {
-    if (taskSpaceWebLockIsCurrent(normalizedPrincipal)) return true;
+  if (myboxWebLock?.principal === normalizedPrincipal) {
+    if (myboxWebLockIsCurrent(normalizedPrincipal)) return true;
     // A stale Web Lock holder must release the browser lock before another
     // tab can acquire it. The local lease check below intentionally remains
     // false until this tab successfully renews ownership.
-    taskSpaceReleaseWebLock(normalizedPrincipal);
+    myboxReleaseWebLock(normalizedPrincipal);
   }
-  const key = taskSpaceKeyFor(normalizedPrincipal, "sync-lease");
-  const token = taskSpaceLeaseTokens.get(key);
+  const key = myboxKeyFor(normalizedPrincipal, "sync-lease");
+  const token = myboxLeaseTokens.get(key);
   if (!token) return false;
   if (token.storageDisabled) return true;
   try {
@@ -2029,23 +2029,23 @@ export function taskSpaceIsSyncLeaseOwner(principal) {
   }
 }
 
-export function taskSpaceSyncLeaseEpoch(principal) {
+export function myboxSyncLeaseEpoch(principal) {
   const normalizedPrincipal = String(principal || "guest");
-  if (taskSpaceWebLock?.principal === normalizedPrincipal) return 0;
-  const token = taskSpaceLeaseTokens.get(taskSpaceKeyFor(normalizedPrincipal, "sync-lease"));
+  if (myboxWebLock?.principal === normalizedPrincipal) return 0;
+  const token = myboxLeaseTokens.get(myboxKeyFor(normalizedPrincipal, "sync-lease"));
   return Number(token?.epoch) || 0;
 }
 
-export function taskSpaceSyncLeaseMode(principal) {
+export function myboxSyncLeaseMode(principal) {
   const normalizedPrincipal = String(principal || "guest");
-  if (taskSpaceWebLock?.principal === normalizedPrincipal) return "web-lock";
-  const token = taskSpaceLeaseTokens.get(taskSpaceKeyFor(normalizedPrincipal, "sync-lease"));
+  if (myboxWebLock?.principal === normalizedPrincipal) return "web-lock";
+  const token = myboxLeaseTokens.get(myboxKeyFor(normalizedPrincipal, "sync-lease"));
   if (token?.storageDisabled) return "server-idempotency-fallback";
   return token ? "local-storage-epoch" : "none";
 }
 
-export function taskSpaceCurrentSyncCursor(principal) {
-  const key = `task-space:sync-cursor:${String(principal || "guest")}`;
+export function myboxCurrentSyncCursor(principal) {
+  const key = `mybox:sync-cursor:${String(principal || "guest")}`;
   try {
     return globalThis.localStorage?.getItem(key) || "0";
   } catch (_) {
@@ -2053,23 +2053,23 @@ export function taskSpaceCurrentSyncCursor(principal) {
   }
 }
 
-export function taskSpaceRebaseMetadataUpdate(principal, spaceId, operationId, expectedVersion) {
+export function myboxRebaseMetadataUpdate(principal, spaceId, operationId, expectedVersion) {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    const request = indexedDB.open("task-space", 7);
-    request.onupgradeneeded = () => taskSpaceEnsureStores(request.result);
+    const request = indexedDB.open("mybox", 7);
+    request.onupgradeneeded = () => myboxEnsureStores(request.result);
     request.onerror = () => reject(request.error || new Error("Could not open IndexedDB"));
     request.onsuccess = () => {
-      const db = taskSpaceConfigureDb(request.result);
+      const db = myboxConfigureDb(request.result);
       if (!db.objectStoreNames.contains("metadata-updates")) {
         resolve(false);
         return;
       }
       const transaction = db.transaction("metadata-updates", "readwrite");
-      const key = taskSpaceKeyFor(principal, `${spaceId}:${operationId}`);
+      const key = myboxKeyFor(principal, `${spaceId}:${operationId}`);
       const store = transaction.objectStore("metadata-updates");
       const read = store.get(key);
       read.onerror = () => reject(read.error || new Error("Could not read metadata update"));
@@ -2087,53 +2087,53 @@ export function taskSpaceRebaseMetadataUpdate(principal, spaceId, operationId, e
   });
 }
 
-export function taskSpaceStartSyncBroadcast(principal, onHint) {
+export function myboxStartSyncBroadcast(principal, onHint) {
   if (typeof globalThis.BroadcastChannel !== "function") return false;
   try {
-    if (taskSpaceBroadcast) taskSpaceBroadcast.close();
-    taskSpaceBroadcast = new BroadcastChannel(`task-space-sync:${String(principal || "guest")}`);
-    taskSpaceBroadcast.onmessage = (event) => {
+    if (myboxBroadcast) myboxBroadcast.close();
+    myboxBroadcast = new BroadcastChannel(`mybox-sync:${String(principal || "guest")}`);
+    myboxBroadcast.onmessage = (event) => {
       if (event.data === "sync") onHint();
     };
     return true;
   } catch (_) {
-    taskSpaceBroadcast = null;
+    myboxBroadcast = null;
     return false;
   }
 }
 
-function taskSpaceLocalChannelName(principal) {
-  return `${taskSpaceLocalBroadcastProtocolVersion}:${taskSpaceLocalBroadcastPrincipal}:${String(principal || "guest")}`;
+function myboxLocalChannelName(principal) {
+  return `${myboxLocalBroadcastProtocolVersion}:${myboxLocalBroadcastPrincipal}:${String(principal || "guest")}`;
 }
 
-function taskSpaceLocalStorageKey(principal) {
-  return `${taskSpaceLocalStorageSyncKeyBase}:${String(principal || "guest")}`;
+function myboxLocalStorageKey(principal) {
+  return `${myboxLocalStorageSyncKeyBase}:${String(principal || "guest")}`;
 }
 
-function taskSpaceInstallLocalStorageListener(onUpdate) {
+function myboxInstallLocalStorageListener(onUpdate) {
   if (typeof globalThis.addEventListener !== "function") return false;
-  taskSpaceLocalStorageListener = (event) => {
-    if (event.key === taskSpaceLocalStorageSyncKey && event.newValue) {
+  myboxLocalStorageListener = (event) => {
+    if (event.key === myboxLocalStorageSyncKey && event.newValue) {
       onUpdate(event.newValue);
     }
   };
-  globalThis.addEventListener("storage", taskSpaceLocalStorageListener);
+  globalThis.addEventListener("storage", myboxLocalStorageListener);
   return true;
 }
 
-function taskSpaceOpenLocalBroadcast(onUpdate) {
-  if (taskSpaceLocalBroadcast) taskSpaceLocalBroadcast.close();
-  taskSpaceLocalBroadcast = null;
+function myboxOpenLocalBroadcast(onUpdate) {
+  if (myboxLocalBroadcast) myboxLocalBroadcast.close();
+  myboxLocalBroadcast = null;
   if (typeof globalThis.BroadcastChannel === "function") {
     try {
-      taskSpaceLocalBroadcast = new BroadcastChannel(
-        taskSpaceLocalChannelName(taskSpaceLocalBroadcastPrincipal),
+      myboxLocalBroadcast = new BroadcastChannel(
+        myboxLocalChannelName(myboxLocalBroadcastPrincipal),
       );
-      taskSpaceLocalBroadcast.onmessage = (event) => {
+      myboxLocalBroadcast.onmessage = (event) => {
         onUpdate(event.data);
       };
     } catch (_) {
-      taskSpaceLocalBroadcast = null;
+      myboxLocalBroadcast = null;
     }
   }
 }
@@ -2144,65 +2144,65 @@ function taskSpaceOpenLocalBroadcast(onUpdate) {
 // receiving only a request to contact the server. The transport is scoped to
 // the current principal so an account switch cannot expose old-account
 // payloads to a new-account tab on the same origin.
-export function taskSpaceStartLocalBroadcast(principal, onUpdate) {
-  taskSpaceLocalBroadcastPrincipal = String(principal || "guest");
-  taskSpaceLocalStorageSyncKey = taskSpaceLocalStorageKey(taskSpaceLocalBroadcastPrincipal);
-  taskSpaceLocalBroadcastOnUpdate = onUpdate;
-  if (taskSpaceLocalStorageListener) {
-    globalThis.removeEventListener?.("storage", taskSpaceLocalStorageListener);
-    taskSpaceLocalStorageListener = null;
+export function myboxStartLocalBroadcast(principal, onUpdate) {
+  myboxLocalBroadcastPrincipal = String(principal || "guest");
+  myboxLocalStorageSyncKey = myboxLocalStorageKey(myboxLocalBroadcastPrincipal);
+  myboxLocalBroadcastOnUpdate = onUpdate;
+  if (myboxLocalStorageListener) {
+    globalThis.removeEventListener?.("storage", myboxLocalStorageListener);
+    myboxLocalStorageListener = null;
   }
-  taskSpaceOpenLocalBroadcast(onUpdate);
+  myboxOpenLocalBroadcast(onUpdate);
   // Keep the storage-event fallback active even when BroadcastChannel exists.
   // Some browser profiles expose the API but suppress delivery in private,
   // suspended, or partitioned contexts. Duplicate delivery is harmless: the
   // CRDT update is idempotent and metadata application is state-idempotent.
-  const hasStorageListener = taskSpaceInstallLocalStorageListener(onUpdate);
-  return Boolean(taskSpaceLocalBroadcast || hasStorageListener);
+  const hasStorageListener = myboxInstallLocalStorageListener(onUpdate);
+  return Boolean(myboxLocalBroadcast || hasStorageListener);
 }
 
-export function taskSpaceSetLocalBroadcastPrincipal(principal) {
-  if (!taskSpaceLocalBroadcastOnUpdate) return false;
-  taskSpaceLocalBroadcastPrincipal = String(principal || "guest");
-  taskSpaceLocalStorageSyncKey = taskSpaceLocalStorageKey(taskSpaceLocalBroadcastPrincipal);
-  if (taskSpaceLocalStorageListener) {
-    globalThis.removeEventListener?.("storage", taskSpaceLocalStorageListener);
-    taskSpaceLocalStorageListener = null;
+export function myboxSetLocalBroadcastPrincipal(principal) {
+  if (!myboxLocalBroadcastOnUpdate) return false;
+  myboxLocalBroadcastPrincipal = String(principal || "guest");
+  myboxLocalStorageSyncKey = myboxLocalStorageKey(myboxLocalBroadcastPrincipal);
+  if (myboxLocalStorageListener) {
+    globalThis.removeEventListener?.("storage", myboxLocalStorageListener);
+    myboxLocalStorageListener = null;
   }
-  taskSpaceOpenLocalBroadcast(taskSpaceLocalBroadcastOnUpdate);
-  const hasStorageListener = taskSpaceInstallLocalStorageListener(taskSpaceLocalBroadcastOnUpdate);
-  return Boolean(taskSpaceLocalBroadcast || hasStorageListener);
+  myboxOpenLocalBroadcast(myboxLocalBroadcastOnUpdate);
+  const hasStorageListener = myboxInstallLocalStorageListener(myboxLocalBroadcastOnUpdate);
+  return Boolean(myboxLocalBroadcast || hasStorageListener);
 }
 
-function taskSpaceSendLocalPayload(payload) {
-  if (taskSpaceLocalBroadcast) {
-    taskSpaceLocalBroadcast.postMessage(payload);
+function myboxSendLocalPayload(payload) {
+  if (myboxLocalBroadcast) {
+    myboxLocalBroadcast.postMessage(payload);
   }
   try {
-    globalThis.localStorage?.setItem(taskSpaceLocalStorageSyncKey, payload);
+    globalThis.localStorage?.setItem(myboxLocalStorageSyncKey, payload);
   } catch (_) {
     // BroadcastChannel remains available when localStorage is blocked in
     // private/restricted browser modes.
   }
 }
 
-export function taskSpacePublishLocalUpdate(principal, spaceId, localGeneration, encodedUpdate, originDeviceId) {
-  if ((!taskSpaceLocalBroadcast && !taskSpaceLocalStorageListener) || !encodedUpdate) return;
-  taskSpaceSendLocalPayload(JSON.stringify({
-    protocolVersion: taskSpaceLocalBroadcastProtocolVersion,
+export function myboxPublishLocalUpdate(principal, spaceId, localGeneration, encodedUpdate, originDeviceId) {
+  if ((!myboxLocalBroadcast && !myboxLocalStorageListener) || !encodedUpdate) return;
+  myboxSendLocalPayload(JSON.stringify({
+    protocolVersion: myboxLocalBroadcastProtocolVersion,
     principal: String(principal || "guest"),
     spaceId: Number(spaceId),
     localGeneration: Number(localGeneration) || 0,
     originDeviceId: String(originDeviceId || ""),
-    originTabId: taskSpaceTabId,
+    originTabId: myboxTabId,
     update: String(encodedUpdate),
   }));
 }
 
-export function taskSpacePublishLocalMetadata(principal, spaceId, operation, name, operationId, createdAt, originDeviceId) {
-  if (!taskSpaceLocalBroadcast && !taskSpaceLocalStorageListener) return;
-  taskSpaceSendLocalPayload(JSON.stringify({
-    protocolVersion: taskSpaceLocalBroadcastProtocolVersion,
+export function myboxPublishLocalMetadata(principal, spaceId, operation, name, operationId, createdAt, originDeviceId) {
+  if (!myboxLocalBroadcast && !myboxLocalStorageListener) return;
+  myboxSendLocalPayload(JSON.stringify({
+    protocolVersion: myboxLocalBroadcastProtocolVersion,
     kind: "metadata",
     principal: String(principal || "guest"),
     spaceId: Number(spaceId),
@@ -2211,14 +2211,14 @@ export function taskSpacePublishLocalMetadata(principal, spaceId, operation, nam
     operationId: operationId == null ? null : String(operationId),
     createdAt: Number(createdAt) || Date.now(),
     originDeviceId: String(originDeviceId || ""),
-    originTabId: taskSpaceTabId,
+    originTabId: myboxTabId,
   }));
 }
 
-export function taskSpacePublishLocalSpace(principal, spaceId, name, stableSpaceId, originDeviceId) {
-  if (!taskSpaceLocalBroadcast && !taskSpaceLocalStorageListener) return;
-  taskSpaceSendLocalPayload(JSON.stringify({
-    protocolVersion: taskSpaceLocalBroadcastProtocolVersion,
+export function myboxPublishLocalSpace(principal, spaceId, name, stableSpaceId, originDeviceId) {
+  if (!myboxLocalBroadcast && !myboxLocalStorageListener) return;
+  myboxSendLocalPayload(JSON.stringify({
+    protocolVersion: myboxLocalBroadcastProtocolVersion,
     kind: "space",
     principal: String(principal || "guest"),
     spaceId: Number(spaceId),
@@ -2226,86 +2226,86 @@ export function taskSpacePublishLocalSpace(principal, spaceId, name, stableSpace
     name: name == null ? null : String(name),
     stableSpaceId: stableSpaceId == null ? null : String(stableSpaceId),
     originDeviceId: String(originDeviceId || ""),
-    originTabId: taskSpaceTabId,
+    originTabId: myboxTabId,
   }));
 }
 
 // A space's cloud/local choice is a local-vault setting, not a server
 // metadata operation. Broadcast it separately so sibling tabs stop/start
 // treating the same durable outbox as cloud work immediately.
-export function taskSpacePublishLocalSpaceSyncState(principal, spaceId, syncEnabled, originDeviceId) {
-  if (!taskSpaceLocalBroadcast && !taskSpaceLocalStorageListener) return;
-  taskSpaceSendLocalPayload(JSON.stringify({
-    protocolVersion: taskSpaceLocalBroadcastProtocolVersion,
+export function myboxPublishLocalSpaceSyncState(principal, spaceId, syncEnabled, originDeviceId) {
+  if (!myboxLocalBroadcast && !myboxLocalStorageListener) return;
+  myboxSendLocalPayload(JSON.stringify({
+    protocolVersion: myboxLocalBroadcastProtocolVersion,
     kind: "space-settings",
     principal: String(principal || "guest"),
     spaceId: Number(spaceId),
     operation: "sync",
     syncEnabled: Boolean(syncEnabled),
     originDeviceId: String(originDeviceId || ""),
-    originTabId: taskSpaceTabId,
+    originTabId: myboxTabId,
   }));
 }
 
-export function taskSpaceCurrentTabId() {
-  return taskSpaceTabId;
+export function myboxCurrentTabId() {
+  return myboxTabId;
 }
 
-export function taskSpaceStopLocalBroadcast() {
-  if (taskSpaceLocalBroadcast) {
-    taskSpaceLocalBroadcast.close();
-    taskSpaceLocalBroadcast = null;
+export function myboxStopLocalBroadcast() {
+  if (myboxLocalBroadcast) {
+    myboxLocalBroadcast.close();
+    myboxLocalBroadcast = null;
   }
-  if (taskSpaceLocalStorageListener) {
-    globalThis.removeEventListener?.("storage", taskSpaceLocalStorageListener);
-    taskSpaceLocalStorageListener = null;
+  if (myboxLocalStorageListener) {
+    globalThis.removeEventListener?.("storage", myboxLocalStorageListener);
+    myboxLocalStorageListener = null;
   }
-  taskSpaceLocalBroadcastOnUpdate = null;
+  myboxLocalBroadcastOnUpdate = null;
 }
 
-export function taskSpacePublishSyncHint() {
-  if (taskSpaceBroadcast) taskSpaceBroadcast.postMessage("sync");
+export function myboxPublishSyncHint() {
+  if (myboxBroadcast) myboxBroadcast.postMessage("sync");
 }
 
-export function taskSpaceStopSyncBroadcast() {
-  if (!taskSpaceBroadcast) return;
-  taskSpaceBroadcast.close();
-  taskSpaceBroadcast = null;
+export function myboxStopSyncBroadcast() {
+  if (!myboxBroadcast) return;
+  myboxBroadcast.close();
+  myboxBroadcast = null;
 }
 
-export function taskSpaceStartSyncSafetyTimer(onTick) {
+export function myboxStartSyncSafetyTimer(onTick) {
   // SSE is a latency optimization, not the correctness path. Keep a bounded
   // coordinator-only server reconciliation timer so a proxy can silently
   // buffer/drop an EventSource stream without leaving another browser stale.
   const id = setInterval(onTick, 15_000);
-  taskSpaceSafetyTimers.set(id, onTick);
+  myboxSafetyTimers.set(id, onTick);
   return id;
 }
 
-export function taskSpaceStopSyncSafetyTimer(id) {
+export function myboxStopSyncSafetyTimer(id) {
   clearInterval(id);
-  taskSpaceSafetyTimers.delete(id);
+  myboxSafetyTimers.delete(id);
 }
 
-export function taskSpaceStartLocalRefresh(onTick) {
+export function myboxStartLocalRefresh(onTick) {
   return setInterval(onTick, 10_000);
 }
 
-export function taskSpaceStopLocalRefresh(id) {
+export function myboxStopLocalRefresh(id) {
   clearInterval(id);
 }
 
-export function taskSpaceStartAccountRefresh(onTick) {
+export function myboxStartAccountRefresh(onTick) {
   return setInterval(onTick, 60_000);
 }
 
-export function taskSpaceStopAccountRefresh(id) {
+export function myboxStopAccountRefresh(id) {
   clearInterval(id);
 }
 
-export function taskSpaceStartSyncEvents(url, onUpdate, onOpen, onError) {
-  taskSpaceStopSyncEvents(url);
-  const cursorKey = `task-space:sync-cursor:${taskSpaceSyncPrincipal}`;
+export function myboxStartSyncEvents(url, onUpdate, onOpen, onError) {
+  myboxStopSyncEvents(url);
+  const cursorKey = `mybox:sync-cursor:${myboxSyncPrincipal}`;
   let cursor = null;
   try {
     cursor = globalThis.localStorage?.getItem(cursorKey);
@@ -2313,27 +2313,27 @@ export function taskSpaceStartSyncEvents(url, onUpdate, onOpen, onError) {
   const eventUrl = cursor
     ? `${url}${url.includes("?") ? "&" : "?"}after_event_id=${encodeURIComponent(cursor)}`
     : url;
-  taskSpaceSyncTransport.connections += 1;
-  if (cursor || taskSpaceSyncTransport.connections > 1) {
-    taskSpaceSyncTransport.reconnects += 1;
+  myboxSyncTransport.connections += 1;
+  if (cursor || myboxSyncTransport.connections > 1) {
+    myboxSyncTransport.reconnects += 1;
   }
   let source;
   try {
     source = new EventSource(eventUrl, { withCredentials: true });
   } catch (_) {
-    taskSpaceSyncTransport.connected = false;
-    taskSpaceSyncTransport.lastErrorAt = Date.now();
+    myboxSyncTransport.connected = false;
+    myboxSyncTransport.lastErrorAt = Date.now();
     onError();
     return false;
   }
   const update = (event) => {
-    taskSpaceSyncTransport.lastEventId = event.lastEventId || taskSpaceSyncTransport.lastEventId;
-    taskSpaceSyncTransport.lastEventAt = Date.now();
+    myboxSyncTransport.lastEventId = event.lastEventId || myboxSyncTransport.lastEventId;
+    myboxSyncTransport.lastEventAt = Date.now();
     onUpdate(event.data);
   };
   const reset = () => {
-    taskSpaceSyncTransport.connected = false;
-    taskSpaceSyncTransport.resets += 1;
+    myboxSyncTransport.connected = false;
+    myboxSyncTransport.resets += 1;
     try {
       globalThis.localStorage?.removeItem(cursorKey);
     } catch (_) {}
@@ -2341,64 +2341,64 @@ export function taskSpaceStartSyncEvents(url, onUpdate, onOpen, onError) {
     // recreating the source is required; merely clearing localStorage would
     // otherwise let the browser send the expired cursor again after the next
     // network flap and repeatedly trigger the reset path.
-    const current = taskSpaceSyncSources.get(url);
-    if (current?.source === source) taskSpaceSyncSources.delete(url);
+    const current = myboxSyncSources.get(url);
+    if (current?.source === source) myboxSyncSources.delete(url);
     source.close();
     onOpen();
     const timer = globalThis.setTimeout(() => {
-      if (taskSpaceSyncResetTimers.get(url) !== timer) return;
-      taskSpaceSyncResetTimers.delete(url);
-      if (!taskSpaceSyncSources.has(url)) {
-        taskSpaceStartSyncEvents(url, onUpdate, onOpen, onError);
+      if (myboxSyncResetTimers.get(url) !== timer) return;
+      myboxSyncResetTimers.delete(url);
+      if (!myboxSyncSources.has(url)) {
+        myboxStartSyncEvents(url, onUpdate, onOpen, onError);
       }
     }, 0);
-    taskSpaceSyncResetTimers.set(url, timer);
+    myboxSyncResetTimers.set(url, timer);
   };
   source.addEventListener("space-update", update);
   source.addEventListener("sync-reset", reset);
   source.onopen = () => {
-    taskSpaceSyncTransport.connected = true;
-    taskSpaceSyncTransport.lastOpenAt = Date.now();
+    myboxSyncTransport.connected = true;
+    myboxSyncTransport.lastOpenAt = Date.now();
     onOpen();
   };
   source.onerror = () => {
-    taskSpaceSyncTransport.connected = false;
-    taskSpaceSyncTransport.lastErrorAt = Date.now();
+    myboxSyncTransport.connected = false;
+    myboxSyncTransport.lastErrorAt = Date.now();
     // Keep the cursor across transient disconnects. The server emits an
     // explicit sync-reset event when retention has made a cursor unreplayable.
     const now = Date.now();
-    if (!source.__taskSpaceLastErrorAt || now - source.__taskSpaceLastErrorAt > 5_000) {
-      source.__taskSpaceLastErrorAt = now;
+    if (!source.__myboxLastErrorAt || now - source.__myboxLastErrorAt > 5_000) {
+      source.__myboxLastErrorAt = now;
       onError();
     }
   };
-  taskSpaceSyncSources.set(url, { source, update, reset });
+  myboxSyncSources.set(url, { source, update, reset });
   return true;
 }
 
-export function taskSpaceStopSyncEvents(url) {
-  const resetTimer = taskSpaceSyncResetTimers.get(url);
+export function myboxStopSyncEvents(url) {
+  const resetTimer = myboxSyncResetTimers.get(url);
   if (resetTimer != null) {
     globalThis.clearTimeout(resetTimer);
-    taskSpaceSyncResetTimers.delete(url);
+    myboxSyncResetTimers.delete(url);
   }
-  const existing = taskSpaceSyncSources.get(url);
+  const existing = myboxSyncSources.get(url);
   if (!existing) return;
   existing.source.removeEventListener("space-update", existing.update);
   existing.source.removeEventListener("sync-reset", existing.reset);
   existing.source.close();
-  taskSpaceSyncTransport.connected = false;
-  taskSpaceSyncSources.delete(url);
+  myboxSyncTransport.connected = false;
+  myboxSyncSources.delete(url);
 }
 
-export function taskSpaceSyncTransportDiagnostics() {
-  return { ...taskSpaceSyncTransport };
+export function myboxSyncTransportDiagnostics() {
+  return { ...myboxSyncTransport };
 }
 
-export function taskSpaceSaveSyncCursor(cursor) {
+export function myboxSaveSyncCursor(cursor) {
   if (!cursor) return;
   try {
-    const key = `task-space:sync-cursor:${taskSpaceSyncPrincipal}`;
+    const key = `mybox:sync-cursor:${myboxSyncPrincipal}`;
     const next = Number(cursor);
     const current = Number(globalThis.localStorage?.getItem(key));
     if (Number.isFinite(next) && (!Number.isFinite(current) || next > current)) {
@@ -2408,25 +2408,25 @@ export function taskSpaceSaveSyncCursor(cursor) {
 }
 "#)]
 unsafe extern "C" {
-    #[wasm_bindgen(js_name = taskSpaceSetSyncPrincipal)]
+    #[wasm_bindgen(js_name = myboxSetSyncPrincipal)]
     fn indexed_db_set_sync_principal(principal: &str) -> String;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadWorkspace)]
+    #[wasm_bindgen(js_name = myboxLoadWorkspace)]
     fn indexed_db_load_workspace() -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceSaveWorkspace)]
+    #[wasm_bindgen(js_name = myboxSaveWorkspace)]
     fn indexed_db_save_workspace(raw: &str, principal: &str) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceExportIndexedDbBackup)]
+    #[wasm_bindgen(js_name = myboxExportIndexedDbBackup)]
     fn indexed_db_export_backup(principal: &str) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadCrdt)]
+    #[wasm_bindgen(js_name = myboxLoadCrdt)]
     fn indexed_db_load_crdt(space_id: u64) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadCrdtOutbox)]
+    #[wasm_bindgen(js_name = myboxLoadCrdtOutbox)]
     fn indexed_db_load_crdt_outbox(space_id: u64) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceQueueIncomingCrdtUpdate)]
+    #[wasm_bindgen(js_name = myboxQueueIncomingCrdtUpdate)]
     fn indexed_db_queue_incoming_crdt_update(
         principal: &str,
         space_id: u64,
@@ -2435,7 +2435,7 @@ unsafe extern "C" {
         encoded_update: &str,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceSaveCrdt)]
+    #[wasm_bindgen(js_name = myboxSaveCrdt)]
     fn indexed_db_save_crdt(
         principal: &str,
         space_id: u64,
@@ -2445,7 +2445,7 @@ unsafe extern "C" {
         origin_generation: u64,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceQueueCrdtUpdate)]
+    #[wasm_bindgen(js_name = myboxQueueCrdtUpdate)]
     fn indexed_db_queue_crdt_update(
         principal: &str,
         space_id: u64,
@@ -2459,14 +2459,14 @@ unsafe extern "C" {
         workspace_raw: Option<&str>,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceSaveSyncState)]
+    #[wasm_bindgen(js_name = myboxSaveSyncState)]
     fn indexed_db_save_sync_state(
         principal: &str,
         space_id: u64,
         state_vector: &str,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceCommitCrdtPull)]
+    #[wasm_bindgen(js_name = myboxCommitCrdtPull)]
     fn indexed_db_commit_crdt_pull(
         principal: &str,
         space_id: u64,
@@ -2476,7 +2476,7 @@ unsafe extern "C" {
         inbox_keys_json: &str,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceCommitCrdtEvent)]
+    #[wasm_bindgen(js_name = myboxCommitCrdtEvent)]
     fn indexed_db_commit_crdt_event(
         principal: &str,
         space_id: u64,
@@ -2484,26 +2484,26 @@ unsafe extern "C" {
         state_vector: &str,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadSyncState)]
+    #[wasm_bindgen(js_name = myboxLoadSyncState)]
     fn indexed_db_load_sync_state(principal: &str, space_id: u64) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadCrdtUpdates)]
+    #[wasm_bindgen(js_name = myboxLoadCrdtUpdates)]
     fn indexed_db_load_crdt_updates() -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadSyncErrors)]
+    #[wasm_bindgen(js_name = myboxLoadSyncErrors)]
     fn indexed_db_load_sync_errors() -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadSyncDiagnostics)]
+    #[wasm_bindgen(js_name = myboxLoadSyncDiagnostics)]
     fn indexed_db_load_sync_diagnostics(principal: &str, space_id: u64) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceAckCrdtUpdate)]
+    #[wasm_bindgen(js_name = myboxAckCrdtUpdate)]
     fn indexed_db_ack_crdt_update(
         principal: &str,
         space_id: u64,
         mutation_id: &str,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceCommitCrdtReconcile)]
+    #[wasm_bindgen(js_name = myboxCommitCrdtReconcile)]
     fn indexed_db_commit_crdt_reconcile(
         principal: &str,
         space_id: u64,
@@ -2514,7 +2514,7 @@ unsafe extern "C" {
         inbox_keys_json: &str,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceQueueMetadataUpdate)]
+    #[wasm_bindgen(js_name = myboxQueueMetadataUpdate)]
     fn indexed_db_queue_metadata_update(
         principal: &str,
         space_id: u64,
@@ -2525,17 +2525,17 @@ unsafe extern "C" {
         workspace_raw: Option<&str>,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceLoadMetadataUpdates)]
+    #[wasm_bindgen(js_name = myboxLoadMetadataUpdates)]
     fn indexed_db_load_metadata_updates() -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceAckMetadataUpdate)]
+    #[wasm_bindgen(js_name = myboxAckMetadataUpdate)]
     fn indexed_db_ack_metadata_update(
         principal: &str,
         space_id: u64,
         operation_id: &str,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceRebaseMetadataUpdate)]
+    #[wasm_bindgen(js_name = myboxRebaseMetadataUpdate)]
     fn indexed_db_rebase_metadata_update(
         principal: &str,
         space_id: u64,
@@ -2543,7 +2543,7 @@ unsafe extern "C" {
         expected_version: Option<u64>,
     ) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceStartSyncEvents)]
+    #[wasm_bindgen(js_name = myboxStartSyncEvents)]
     fn start_sync_events(
         url: &str,
         on_update: &js_sys::Function,
@@ -2551,43 +2551,43 @@ unsafe extern "C" {
         on_error: &js_sys::Function,
     ) -> bool;
 
-    #[wasm_bindgen(js_name = taskSpaceStopSyncEvents)]
+    #[wasm_bindgen(js_name = myboxStopSyncEvents)]
     fn stop_sync_events(url: &str);
 
-    #[wasm_bindgen(js_name = taskSpaceSaveSyncCursor)]
+    #[wasm_bindgen(js_name = myboxSaveSyncCursor)]
     fn save_sync_cursor(cursor: u64);
 
-    #[wasm_bindgen(js_name = taskSpaceSyncTransportDiagnostics)]
+    #[wasm_bindgen(js_name = myboxSyncTransportDiagnostics)]
     fn sync_transport_diagnostics() -> JsValue;
 
-    #[wasm_bindgen(js_name = taskSpaceAcquireSyncLease)]
+    #[wasm_bindgen(js_name = myboxAcquireSyncLease)]
     fn acquire_sync_lease(principal: &str) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceIsSyncLeaseOwner)]
+    #[wasm_bindgen(js_name = myboxIsSyncLeaseOwner)]
     fn is_sync_lease_owner(principal: &str) -> bool;
 
-    #[wasm_bindgen(js_name = taskSpaceSyncLeaseEpoch)]
+    #[wasm_bindgen(js_name = myboxSyncLeaseEpoch)]
     fn sync_lease_epoch(principal: &str) -> f64;
 
-    #[wasm_bindgen(js_name = taskSpaceSyncLeaseMode)]
+    #[wasm_bindgen(js_name = myboxSyncLeaseMode)]
     fn sync_lease_mode(principal: &str) -> String;
 
-    #[wasm_bindgen(js_name = taskSpaceCurrentSyncCursor)]
+    #[wasm_bindgen(js_name = myboxCurrentSyncCursor)]
     fn current_sync_cursor(principal: &str) -> String;
 
-    #[wasm_bindgen(js_name = taskSpaceReleaseSyncLease)]
+    #[wasm_bindgen(js_name = myboxReleaseSyncLease)]
     fn release_sync_lease(principal: &str);
 
-    #[wasm_bindgen(js_name = taskSpaceStartSyncBroadcast)]
+    #[wasm_bindgen(js_name = myboxStartSyncBroadcast)]
     fn start_sync_broadcast(principal: &str, on_hint: &js_sys::Function) -> bool;
 
-    #[wasm_bindgen(js_name = taskSpaceStartLocalBroadcast)]
+    #[wasm_bindgen(js_name = myboxStartLocalBroadcast)]
     fn start_local_broadcast(principal: &str, on_update: &js_sys::Function) -> bool;
 
-    #[wasm_bindgen(js_name = taskSpaceSetLocalBroadcastPrincipal)]
+    #[wasm_bindgen(js_name = myboxSetLocalBroadcastPrincipal)]
     fn set_local_broadcast_principal(principal: &str) -> bool;
 
-    #[wasm_bindgen(js_name = taskSpacePublishLocalUpdate)]
+    #[wasm_bindgen(js_name = myboxPublishLocalUpdate)]
     fn publish_local_update(
         principal: &str,
         space_id: u64,
@@ -2596,7 +2596,7 @@ unsafe extern "C" {
         origin_device_id: &str,
     );
 
-    #[wasm_bindgen(js_name = taskSpacePublishLocalMetadata)]
+    #[wasm_bindgen(js_name = myboxPublishLocalMetadata)]
     fn publish_local_metadata(
         principal: &str,
         space_id: u64,
@@ -2607,7 +2607,7 @@ unsafe extern "C" {
         origin_device_id: &str,
     );
 
-    #[wasm_bindgen(js_name = taskSpacePublishLocalSpace)]
+    #[wasm_bindgen(js_name = myboxPublishLocalSpace)]
     fn publish_local_space(
         principal: &str,
         space_id: u64,
@@ -2616,7 +2616,7 @@ unsafe extern "C" {
         origin_device_id: &str,
     );
 
-    #[wasm_bindgen(js_name = taskSpacePublishLocalSpaceSyncState)]
+    #[wasm_bindgen(js_name = myboxPublishLocalSpaceSyncState)]
     fn publish_local_space_sync_state(
         principal: &str,
         space_id: u64,
@@ -2624,34 +2624,34 @@ unsafe extern "C" {
         origin_device_id: &str,
     );
 
-    #[wasm_bindgen(js_name = taskSpaceCurrentTabId)]
+    #[wasm_bindgen(js_name = myboxCurrentTabId)]
     fn current_tab_id() -> String;
 
-    #[wasm_bindgen(js_name = taskSpaceStopLocalBroadcast)]
+    #[wasm_bindgen(js_name = myboxStopLocalBroadcast)]
     fn stop_local_broadcast();
 
-    #[wasm_bindgen(js_name = taskSpacePublishSyncHint)]
+    #[wasm_bindgen(js_name = myboxPublishSyncHint)]
     fn publish_sync_hint();
 
-    #[wasm_bindgen(js_name = taskSpaceStopSyncBroadcast)]
+    #[wasm_bindgen(js_name = myboxStopSyncBroadcast)]
     fn stop_sync_broadcast();
 
-    #[wasm_bindgen(js_name = taskSpaceStartSyncSafetyTimer)]
+    #[wasm_bindgen(js_name = myboxStartSyncSafetyTimer)]
     fn start_sync_safety_timer(on_tick: &js_sys::Function) -> i32;
 
-    #[wasm_bindgen(js_name = taskSpaceStopSyncSafetyTimer)]
+    #[wasm_bindgen(js_name = myboxStopSyncSafetyTimer)]
     fn stop_sync_safety_timer(timer_id: i32);
 
-    #[wasm_bindgen(js_name = taskSpaceStartLocalRefresh)]
+    #[wasm_bindgen(js_name = myboxStartLocalRefresh)]
     fn start_local_refresh(on_tick: &js_sys::Function) -> i32;
 
-    #[wasm_bindgen(js_name = taskSpaceStopLocalRefresh)]
+    #[wasm_bindgen(js_name = myboxStopLocalRefresh)]
     fn stop_local_refresh(timer_id: i32);
 
-    #[wasm_bindgen(js_name = taskSpaceStartAccountRefresh)]
+    #[wasm_bindgen(js_name = myboxStartAccountRefresh)]
     fn start_account_refresh(on_tick: &js_sys::Function) -> i32;
 
-    #[wasm_bindgen(js_name = taskSpaceStopAccountRefresh)]
+    #[wasm_bindgen(js_name = myboxStopAccountRefresh)]
     fn stop_account_refresh(timer_id: i32);
 }
 
@@ -5216,7 +5216,7 @@ fn next_sync_mutation_id() -> String {
 
 fn next_local_generation(space_id: u64) -> u64 {
     let principal = current_sync_principal();
-    let key = format!("task-space:generation:{principal}:{space_id}");
+    let key = format!("mybox:generation:{principal}:{space_id}");
     let persisted = web_sys::window()
         .and_then(|window| window.local_storage().ok().flatten())
         .and_then(|storage| storage.get_item(&key).ok().flatten())
@@ -5248,7 +5248,7 @@ fn current_local_generation(space_id: u64) -> u64 {
         .and_then(|window| window.local_storage().ok().flatten())
         .and_then(|storage| {
             storage
-                .get_item(&format!("task-space:generation:{principal}:{space_id}"))
+                .get_item(&format!("mybox:generation:{principal}:{space_id}"))
                 .ok()
                 .flatten()
         })
@@ -5651,7 +5651,7 @@ fn coordinator_lease_was_lost(runtime: SyncRuntime) -> bool {
 }
 
 fn response_error_code(response: &Response) -> Option<String> {
-    response.headers().get("x-task-space-error-code")
+    response.headers().get("x-mybox-error-code")
 }
 
 fn retry_result_for_response(response: &Response) -> QueueDrainResult {
@@ -9324,7 +9324,7 @@ fn export_workspace(workspace: &WorkspaceData) {
     let Ok(raw) = serde_json::to_string_pretty(workspace) else {
         return;
     };
-    download_json(&raw, "task-space-workspace.json");
+    download_json(&raw, "mybox-workspace.json");
 }
 
 fn export_local_storage_backup(restore_message: RwSignal<Option<String>>) {
@@ -9336,7 +9336,7 @@ fn export_local_storage_backup(restore_message: RwSignal<Option<String>>) {
                     restore_message.set(Some("couldn't export local data".into()));
                     return;
                 };
-                download_json(&raw, "task-space-local-storage-backup.json");
+                download_json(&raw, "mybox-local-storage-backup.json");
                 restore_message.set(Some(
                     "local backup exported — keep it before restoring or clearing this device"
                         .into(),
@@ -9371,7 +9371,7 @@ fn export_sync_diagnostics(
     spawn_local(async move {
         let sync_errors = load_local_sync_errors().await.unwrap_or_default();
         let payload = serde_json::json!({
-            "format": "task-space-sync-diagnostics",
+            "format": "mybox-sync-diagnostics",
             "exportedAt": now_millis(),
             "schemaVersion": CURRENT_SCHEMA_VERSION,
             "principal": principal,
@@ -9394,7 +9394,7 @@ fn export_sync_diagnostics(
         });
         match serde_json::to_string_pretty(&payload) {
             Ok(raw) => {
-                download_json(&raw, "task-space-sync-diagnostics.json");
+                download_json(&raw, "mybox-sync-diagnostics.json");
                 restore_message.set(Some(
                     "sync diagnostics exported — document contents and credentials were excluded"
                         .into(),
@@ -9414,7 +9414,7 @@ fn board_position(
 ) -> Option<(f64, f64)> {
     let board = web_sys::window()?
         .document()?
-        .get_element_by_id("task-space-board")?;
+        .get_element_by_id("mybox-board")?;
     let rect = board.get_bounding_client_rect();
     let x = (client_x - rect.left() - rect.width() / 2.0 - pan.0 - offset.0) / zoom;
     let y = (client_y - rect.top() - rect.height() / 2.0 - pan.1 - offset.1) / zoom;
@@ -9659,7 +9659,7 @@ fn notes_in_marquee(
 ) -> Vec<u64> {
     let Some(board) = web_sys::window()
         .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("task-space-board"))
+        .and_then(|document| document.get_element_by_id("mybox-board"))
     else {
         return Vec::new();
     };
@@ -9687,7 +9687,7 @@ fn notes_in_marquee(
 fn marquee_style(start: (f64, f64), current: (f64, f64)) -> String {
     let Some(board) = web_sys::window()
         .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("task-space-board"))
+        .and_then(|document| document.get_element_by_id("mybox-board"))
     else {
         return String::new();
     };
@@ -10567,7 +10567,7 @@ fn NoteCard(
     view! {
         <article
             class=move || format!(
-                "group task-space-note absolute w-52 min-h-40 p-3 pb-9 rounded-[3px] shadow-lg select-none touch-none transition-[transform,box-shadow] duration-100 {} {}",
+                "group mybox-note absolute w-52 min-h-40 p-3 pb-9 rounded-[3px] shadow-lg select-none touch-none transition-[transform,box-shadow] duration-100 {} {}",
                 if note_snapshot(notes, id).is_some_and(|note| note.status == NoteStatus::Done) { "opacity-70" } else { "" },
                 if dragged.get() == Some(id) {
                     "z-20 cursor-grabbing shadow-2xl ring-2 ring-ink/10"
@@ -11430,7 +11430,7 @@ pub fn Board() -> impl IntoView {
         else {
             return;
         };
-        if target.closest(".task-space-note").ok().flatten().is_some() {
+        if target.closest(".mybox-note").ok().flatten().is_some() {
             return;
         }
         let Some(surface) = ev
@@ -11504,7 +11504,7 @@ pub fn Board() -> impl IntoView {
         if ev.ctrl_key() || ev.meta_key() {
             let Some(board) = web_sys::window()
                 .and_then(|window| window.document())
-                .and_then(|document| document.get_element_by_id("task-space-board"))
+                .and_then(|document| document.get_element_by_id("mybox-board"))
             else {
                 return;
             };
@@ -11711,7 +11711,7 @@ pub fn Board() -> impl IntoView {
                 editing.set(None);
                 restore_message.set(Some("board restored into current space".into()));
             } else {
-                restore_message.set(Some("that file is not a Task Space backup".into()));
+                restore_message.set(Some("that file is not a MyBox backup".into()));
             }
         }) as Box<dyn FnMut(_)>);
         reader.set_onload(Some(onload.as_ref().unchecked_ref()));
@@ -11807,7 +11807,7 @@ pub fn Board() -> impl IntoView {
             on:pointerdown=move |_| context_menu.set(None)
         >
             <div
-                id="task-space-board"
+                id="mybox-board"
                 class=move || if pan_pointer.get().is_some() {
                     "absolute inset-0 overflow-hidden bg-paper-shelf cursor-grabbing touch-none"
                 } else {
@@ -12089,11 +12089,11 @@ pub fn Board() -> impl IntoView {
                 }
             })}
 
-            <header class="task-space-safe-top pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-col items-stretch gap-2 sm:inset-x-5 sm:top-5 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
+            <header class="mybox-safe-top pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-col items-stretch gap-2 sm:inset-x-5 sm:top-5 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
                 <div class="pointer-events-auto flex min-w-0 max-w-full flex-wrap items-center gap-2 rounded-md border border-ink-soft/15 bg-paper/90 px-2.5 py-2 shadow-md backdrop-blur-sm sm:gap-3 sm:px-3">
-                    <a href="/" class="flex shrink-0 items-center gap-2 whitespace-nowrap" aria-label="Task Space home">
+                    <a href="/" class="flex shrink-0 items-center gap-2 whitespace-nowrap" aria-label="MyBox home">
                         <img src="/smbl-logo.png" alt="SMBL" class="h-6 w-auto"/>
-                        <span class="font-handwriting text-2xl leading-none sm:text-3xl">"Task Space"</span>
+                        <span class="font-handwriting text-2xl leading-none sm:text-3xl">"MyBox"</span>
                     </a>
                     <span class="hidden h-6 w-px bg-ink-soft/20 sm:block"></span>
                     <div class="relative min-w-0">
@@ -12561,7 +12561,7 @@ pub fn Board() -> impl IntoView {
                 >"+"</button>
             </div>
 
-            <div class="task-space-safe-bottom pointer-events-none absolute inset-x-3 bottom-3 z-10 flex justify-end text-xs text-ink-soft sm:inset-x-5 sm:bottom-5">
+            <div class="mybox-safe-bottom pointer-events-none absolute inset-x-3 bottom-3 z-10 flex justify-end text-xs text-ink-soft sm:inset-x-5 sm:bottom-5">
                 <div class="pointer-events-auto flex min-h-7 max-w-full flex-wrap items-center justify-end gap-2">
                     {move || restore_message.get().map(|message| view! {
                         <span class="rounded-[3px] bg-note-green px-2.5 py-1.5 text-note-ink-green shadow-sm">{message}</span>
@@ -12814,7 +12814,7 @@ pub fn Board() -> impl IntoView {
                     id="help-panel"
                     role="dialog"
                     aria-modal="true"
-                    aria-label="Task Space help"
+                    aria-label="MyBox help"
                     class="pointer-events-auto fixed inset-0 z-[90] grid place-items-center bg-ink/20 p-3 backdrop-blur-[2px] sm:p-6"
                     on:pointerdown=move |_| show_help.set(false)
                 >
@@ -12827,7 +12827,7 @@ pub fn Board() -> impl IntoView {
                                 <div>
                                     <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-ink-soft">"help"</p>
                                     <h2 class="mt-1 font-handwriting text-4xl leading-none sm:text-5xl">"make the desk yours"</h2>
-                                    <p class="mt-2 max-w-xl text-sm leading-relaxed text-ink-soft">"A quick field guide for moving, grouping, saving, and finding your way around Task Space."</p>
+                                    <p class="mt-2 max-w-xl text-sm leading-relaxed text-ink-soft">"A quick field guide for moving, grouping, saving, and finding your way around MyBox."</p>
                                 </div>
                                 <button
                                     type="button"
@@ -12862,7 +12862,7 @@ pub fn Board() -> impl IntoView {
                                 <div class="mt-6 border-t border-ink-soft/15 pt-4">
                                     <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-ink-soft">"more from SMBL"</p>
                                     <div class="mt-3 space-y-2 text-sm">
-                                        <a href="https://github.com/MrSheerluck/task-space" target="_blank" rel="noreferrer" class="block rounded-[3px] border border-ink-soft/15 px-3 py-2 text-ink-soft hover:bg-white/70 hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink/30">
+                                        <a href="https://github.com/sonyarianto/mybox" target="_blank" rel="noreferrer" class="block rounded-[3px] border border-ink-soft/15 px-3 py-2 text-ink-soft hover:bg-white/70 hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink/30">
                                             "view the GitHub repository ↗"
                                         </a>
                                         <a href="mailto:support@smbl.dev" class="block rounded-[3px] border border-ink-soft/15 px-3 py-2 text-ink-soft hover:bg-white/70 hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink/30">

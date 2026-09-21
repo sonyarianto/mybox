@@ -5,14 +5,14 @@ set -euo pipefail
 # synthetic metrics -> Prometheus rule -> Alertmanager -> webhook receiver.
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-network="task-space-alerts-${run_id}"
-receiver="task-space-alert-receiver-${run_id}"
-prometheus="task-space-alert-prometheus-${run_id}"
-alertmanager="task-space-alertmanager-${run_id}"
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/task-space-alert-delivery.XXXXXX")"
-prometheus_image="${TASK_SPACE_PROMETHEUS_IMAGE:-prom/prometheus:v2.55.1}"
-alertmanager_image="${TASK_SPACE_ALERTMANAGER_IMAGE:-prom/alertmanager:v0.27.0}"
-receiver_image="${TASK_SPACE_ALERT_RECEIVER_IMAGE:-python:3.12-alpine}"
+network="mybox-alerts-${run_id}"
+receiver="mybox-alert-receiver-${run_id}"
+prometheus="mybox-alert-prometheus-${run_id}"
+alertmanager="mybox-alertmanager-${run_id}"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mybox-alert-delivery.XXXXXX")"
+prometheus_image="${MYBOX_PROMETHEUS_IMAGE:-prom/prometheus:v2.55.1}"
+alertmanager_image="${MYBOX_ALERTMANAGER_IMAGE:-prom/alertmanager:v0.27.0}"
+receiver_image="${MYBOX_ALERT_RECEIVER_IMAGE:-python:3.12-alpine}"
 
 cleanup() {
   docker rm -f "$prometheus" "$alertmanager" "$receiver" >/dev/null 2>&1 || true
@@ -32,7 +32,7 @@ alerting:
     - static_configs:
         - targets: ["alertmanager:9093"]
 scrape_configs:
-  - job_name: task-space-alert-test
+  - job_name: mybox-alert-test
     static_configs:
       - targets: ["receiver:8000"]
     metrics_path: /metrics
@@ -40,10 +40,10 @@ EOF
 
 cat > "$tmp_dir/alert-rules.yml" <<'EOF'
 groups:
-  - name: task-space-alert-delivery-test
+  - name: mybox-alert-delivery-test
     rules:
-      - alert: TaskSpaceReadinessFailures
-        expr: task_space_readiness_failures_total > 0
+      - alert: MyBoxReadinessFailures
+        expr: mybox_readiness_failures_total > 0
         for: 0s
         labels:
           severity: page
@@ -54,12 +54,12 @@ EOF
 
 cat > "$tmp_dir/alertmanager.yml" <<'EOF'
 route:
-  receiver: task-space-test-webhook
+  receiver: mybox-test-webhook
   group_wait: 0s
   group_interval: 1s
   repeat_interval: 1h
 receivers:
-  - name: task-space-test-webhook
+  - name: mybox-test-webhook
     webhook_configs:
       - url: http://receiver:8000/alerts
 EOF
@@ -68,8 +68,8 @@ docker network create "$network" >/dev/null
 docker run --detach --name "$receiver" --network "$network" \
   --network-alias receiver \
   --volume "$repo_dir/scripts/alert-test-endpoint.py:/app/alert-test-endpoint.py:ro" \
-  --volume "$tmp_dir:/tmp/task-space-alerts" \
-  --env TASK_SPACE_ALERT_OUTPUT=/tmp/task-space-alerts/alerts.json \
+  --volume "$tmp_dir:/tmp/mybox-alerts" \
+  --env MYBOX_ALERT_OUTPUT=/tmp/mybox-alerts/alerts.json \
   "$receiver_image" python3 /app/alert-test-endpoint.py >/dev/null
 
 docker run --detach --name "$alertmanager" --network "$network" \
@@ -85,15 +85,15 @@ docker run --detach --name "$prometheus" --network "$network" \
   --config.file=/etc/prometheus/prometheus.yml >/dev/null
 
 for _ in $(seq 1 45); do
-  if docker exec "$receiver" test -s /tmp/task-space-alerts/alerts.json; then
+  if docker exec "$receiver" test -s /tmp/mybox-alerts/alerts.json; then
     break
   fi
   sleep 1
 done
 
-docker cp "$receiver:/tmp/task-space-alerts/alerts.json" "$tmp_dir/alerts.json" >/dev/null
-rg -q '"alertname":"TaskSpaceReadinessFailures"' "$tmp_dir/alerts.json"
+docker cp "$receiver:/tmp/mybox-alerts/alerts.json" "$tmp_dir/alerts.json" >/dev/null
+rg -q '"alertname":"MyBoxReadinessFailures"' "$tmp_dir/alerts.json"
 rg -q '"owner":"database"' "$tmp_dir/alerts.json"
 rg -q '"severity":"page"' "$tmp_dir/alerts.json"
 
-printf 'Alert delivery acceptance passed: Prometheus fired TaskSpaceReadinessFailures and Alertmanager delivered it to the webhook receiver\n'
+printf 'Alert delivery acceptance passed: Prometheus fired MyBoxReadinessFailures and Alertmanager delivered it to the webhook receiver\n'

@@ -7,7 +7,7 @@ import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
-OUTPUT = os.environ.get("TASK_SPACE_ALERT_OUTPUT", "/tmp/task-space-alert.json")
+OUTPUT = os.environ.get("MYBOX_ALERT_OUTPUT", "/tmp/mybox-alert.json")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -16,9 +16,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         body = (
-            b"# HELP task_space_readiness_failures_total Synthetic acceptance metric.\n"
-            b"# TYPE task_space_readiness_failures_total counter\n"
-            b"task_space_readiness_failures_total 1\n"
+            b"# HELP mybox_readiness_failures_total Synthetic acceptance metric.\n"
+            b"# TYPE mybox_readiness_failures_total counter\n"
+            b"mybox_readiness_failures_total 1\n"
         )
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4")

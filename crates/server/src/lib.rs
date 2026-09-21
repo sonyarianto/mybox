@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use task_core::EntityId;
-use task_core::crdt::SpaceDoc;
-use task_core::sync::{
+use mybox_core::EntityId;
+use mybox_core::crdt::SpaceDoc;
+use mybox_core::sync::{
     EncodedUpdate, MAX_SYNC_SNAPSHOT_BYTES, MAX_SYNC_STATE_VECTOR_BYTES, MAX_SYNC_UPDATE_BYTES,
     SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_PROTOCOL_VERSION, SYNC_RECONCILE_PROTOCOL_VERSION,
     SyncEvent, SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncReconcileRequest,
@@ -413,8 +413,8 @@ fn validate_document_schema(version: u32) -> Result<(), SyncStoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use task_core::crdt::SpaceDoc;
-    use task_core::{BoardData, Note};
+    use mybox_core::crdt::SpaceDoc;
+    use mybox_core::{BoardData, Note};
 
     fn source_update() -> (EncodedUpdate, EncodedUpdate) {
         let source = SpaceDoc::new();

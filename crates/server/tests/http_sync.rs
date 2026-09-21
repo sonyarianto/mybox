@@ -7,24 +7,24 @@ use axum::body::{Body, to_bytes};
 use axum::http::header::{CONTENT_TYPE, COOKIE, HOST, ORIGIN};
 use axum::http::{Method, Request, StatusCode};
 use serde_json::{Value, json};
-use task_core::BoardData;
-use task_core::sync::{
+use mybox_core::BoardData;
+use mybox_core::sync::{
     EncodedUpdate, SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_RECONCILE_PROTOCOL_VERSION,
 };
-use task_core::{Note, crdt::SpaceDoc};
-use task_server::http::{
+use mybox_core::{Note, crdt::SpaceDoc};
+use mybox_server::http::{
     AuthError, AuthenticatedAccount, RequestRateLimiter, SessionVerifier, SyncHttpState,
     health_router, protected_sync_router,
 };
-use task_server::postgres::PostgresSyncStore;
+use mybox_server::postgres::PostgresSyncStore;
 use tokio::sync::RwLock;
 use tower::ServiceExt;
 use uuid::Uuid;
 
 /// Run with:
 ///
-/// TASK_SPACE_TEST_DATABASE_URL=postgres://... \
-///   cargo test -p task-server --test http_sync -- --ignored --nocapture
+/// MYBOX_TEST_DATABASE_URL=postgres://... \
+///   cargo test -p mybox-server --test http_sync -- --ignored --nocapture
 ///
 /// This test intentionally exercises the real Axum router against PostgreSQL,
 /// but uses a deterministic in-process verifier so it needs no external auth.
@@ -83,10 +83,10 @@ fn bearer(token: &str) -> [(&'static str, &'static str); 1] {
 }
 
 #[tokio::test]
-#[ignore = "requires TASK_SPACE_TEST_DATABASE_URL"]
+#[ignore = "requires MYBOX_TEST_DATABASE_URL"]
 async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
-    let database_url = std::env::var("TASK_SPACE_TEST_DATABASE_URL")
-        .expect("set TASK_SPACE_TEST_DATABASE_URL for the HTTP acceptance test");
+    let database_url = std::env::var("MYBOX_TEST_DATABASE_URL")
+        .expect("set MYBOX_TEST_DATABASE_URL for the HTTP acceptance test");
     let store = PostgresSyncStore::connect(&database_url)
         .await
         .expect("PostgreSQL should be reachable");
@@ -147,7 +147,7 @@ async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
         SyncHttpState {
             store: store.clone(),
             verifier: Arc::new(verifier),
-            session_cookie_name: "task_space_session".to_owned(),
+            session_cookie_name: "mybox_session".to_owned(),
             allowed_origins: Arc::new(vec!["https://app.test".to_owned()]),
             rate_limiter: RequestRateLimiter::default(),
             metrics: Default::default(),
@@ -191,7 +191,7 @@ async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
         Method::POST,
         &format!("/sync/spaces/{}", space_id + 1),
         &[
-            (COOKIE.as_str(), "task_space_session=token-a"),
+            (COOKIE.as_str(), "mybox_session=token-a"),
             (HOST.as_str(), "app.test"),
         ],
         json!({"name": "should be rejected", "stable_id": Uuid::new_v4().to_string()}),
@@ -201,7 +201,7 @@ async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
     assert_eq!(
         csrf_rejected
             .headers()
-            .get("x-task-space-error-code")
+            .get("x-mybox-error-code")
             .and_then(|value| value.to_str().ok()),
         Some("CSRF_REJECTED")
     );
@@ -306,7 +306,7 @@ async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
         "/sync/pull",
         &pull_headers,
         json!({
-            "protocol_version": task_core::sync::SYNC_PROTOCOL_VERSION,
+            "protocol_version": mybox_core::sync::SYNC_PROTOCOL_VERSION,
             "document_schema_version": SYNC_DOCUMENT_SCHEMA_VERSION,
             "space_id": space_id,
             "stable_space_id": stable_space_id,
@@ -362,7 +362,7 @@ async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
     assert_eq!(
         cross_account_reconcile
             .headers()
-            .get("x-task-space-error-code")
+            .get("x-mybox-error-code")
             .and_then(|value| value.to_str().ok()),
         Some("SPACE_ACCESS_DENIED")
     );
@@ -372,7 +372,7 @@ async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
         Method::POST,
         &format!("/sync/spaces/{}", space_id + 1),
         &[
-            (COOKIE.as_str(), "task_space_session=token-a"),
+            (COOKIE.as_str(), "mybox_session=token-a"),
             (HOST.as_str(), "app.test"),
             (ORIGIN.as_str(), "https://app.test"),
             (CONTENT_TYPE.as_str(), "application/json"),

@@ -1,26 +1,26 @@
-use task_core::BoardData;
-use task_core::Note;
-use task_core::crdt::SpaceDoc;
-use task_core::sync::{
+use mybox_core::BoardData;
+use mybox_core::Note;
+use mybox_core::crdt::SpaceDoc;
+use mybox_core::sync::{
     EncodedUpdate, SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_PROTOCOL_VERSION,
     SYNC_RECONCILE_PROTOCOL_VERSION, SpaceMetadataOperation, SyncMetadataRequest, SyncPullRequest,
     SyncReconcileRequest,
 };
-use task_server::postgres::{PostgresStoreError, PostgresSyncStore};
+use mybox_server::postgres::{PostgresStoreError, PostgresSyncStore};
 use uuid::Uuid;
 
 /// Run with:
 ///
-/// TASK_SPACE_TEST_DATABASE_URL=postgres://... \
-///   cargo test -p task-server --test postgres_sync -- --ignored --nocapture
+/// MYBOX_TEST_DATABASE_URL=postgres://... \
+///   cargo test -p mybox-server --test postgres_sync -- --ignored --nocapture
 ///
 /// The account is random and is removed at the end, so this can run against a
 /// disposable staging database after migrations have been applied.
 #[tokio::test]
-#[ignore = "requires TASK_SPACE_TEST_DATABASE_URL"]
+#[ignore = "requires MYBOX_TEST_DATABASE_URL"]
 async fn postgres_sync_round_trip_replay_and_metadata_are_durable() {
-    let database_url = std::env::var("TASK_SPACE_TEST_DATABASE_URL")
-        .expect("set TASK_SPACE_TEST_DATABASE_URL for the PostgreSQL smoke test");
+    let database_url = std::env::var("MYBOX_TEST_DATABASE_URL")
+        .expect("set MYBOX_TEST_DATABASE_URL for the PostgreSQL smoke test");
     let store = PostgresSyncStore::connect(&database_url)
         .await
         .expect("PostgreSQL should be reachable");

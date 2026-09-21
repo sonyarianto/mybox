@@ -100,7 +100,7 @@
     opacity: 0.35;
   }
 
-  #task-space-board {
+  #mybox-board {
     touch-action: none;
     overscroll-behavior: none;
     user-select: none;
@@ -114,11 +114,11 @@
   }
 
   @media (max-width: 639px) {
-    .task-space-safe-top {
+    .mybox-safe-top {
       padding-top: max(0.75rem, env(safe-area-inset-top));
     }
 
-    .task-space-safe-bottom {
+    .mybox-safe-bottom {
       padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
     }
   }

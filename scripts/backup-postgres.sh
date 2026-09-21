@@ -4,9 +4,9 @@ set -euo pipefail
 umask 077
 
 database_url="${DATABASE_URL:?DATABASE_URL must point at the database to back up}"
-backup_dir="${TASK_SPACE_BACKUP_DIR:-./backups}"
+backup_dir="${MYBOX_BACKUP_DIR:-./backups}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-backup_path="${backup_dir}/task-space-${timestamp}.dump"
+backup_path="${backup_dir}/mybox-${timestamp}.dump"
 checksum_path="${backup_path}.sha256"
 
 mkdir -p -- "$backup_dir"

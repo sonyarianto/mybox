@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use task_core::billing::{
+use mybox_core::billing::{
     BILLING_PROTOCOL_VERSION, BillingEvent, Entitlement, FREE_SPACE_LIMIT, PRO_SPACE_LIMIT,
     SubscriptionPlan, SubscriptionStatus, SyncAccessMode,
 };
@@ -116,7 +116,7 @@ impl BillingStore {
 
         let partial_refund = matches!(
             event.event_type,
-            task_core::billing::BillingEventType::RefundSucceeded
+            mybox_core::billing::BillingEventType::RefundSucceeded
         ) && event
             .refund_amount
             .zip(event.payment_amount)
@@ -215,14 +215,14 @@ impl BillingStore {
 
 fn access_mode_for_event(event: &BillingEvent) -> SyncAccessMode {
     match &event.event_type {
-        task_core::billing::BillingEventType::SubscriptionPending => {
+        mybox_core::billing::BillingEventType::SubscriptionPending => {
             SyncAccessMode::PausedNotEntitled
         }
-        task_core::billing::BillingEventType::SubscriptionStarted
-        | task_core::billing::BillingEventType::SubscriptionRenewed
-        | task_core::billing::BillingEventType::SubscriptionChanged
-        | task_core::billing::BillingEventType::DisputeWon
-        | task_core::billing::BillingEventType::RefundFailed => {
+        mybox_core::billing::BillingEventType::SubscriptionStarted
+        | mybox_core::billing::BillingEventType::SubscriptionRenewed
+        | mybox_core::billing::BillingEventType::SubscriptionChanged
+        | mybox_core::billing::BillingEventType::DisputeWon
+        | mybox_core::billing::BillingEventType::RefundFailed => {
             if matches!(event.status, SubscriptionStatus::PastDue) {
                 SyncAccessMode::GraceReadWrite
             } else if matches!(event.status, SubscriptionStatus::Active) {
@@ -231,13 +231,13 @@ fn access_mode_for_event(event: &BillingEvent) -> SyncAccessMode {
                 SyncAccessMode::PausedExpired
             }
         }
-        task_core::billing::BillingEventType::SubscriptionPastDue => SyncAccessMode::GraceReadWrite,
-        task_core::billing::BillingEventType::PaymentFailed => SyncAccessMode::GraceReadWrite,
-        task_core::billing::BillingEventType::DisputeOpened => SyncAccessMode::PausedDispute,
-        task_core::billing::BillingEventType::RefundSucceeded
-        | task_core::billing::BillingEventType::DisputeLost
-        | task_core::billing::BillingEventType::SubscriptionEnded => SyncAccessMode::PausedExpired,
-        task_core::billing::BillingEventType::SubscriptionCanceled => {
+        mybox_core::billing::BillingEventType::SubscriptionPastDue => SyncAccessMode::GraceReadWrite,
+        mybox_core::billing::BillingEventType::PaymentFailed => SyncAccessMode::GraceReadWrite,
+        mybox_core::billing::BillingEventType::DisputeOpened => SyncAccessMode::PausedDispute,
+        mybox_core::billing::BillingEventType::RefundSucceeded
+        | mybox_core::billing::BillingEventType::DisputeLost
+        | mybox_core::billing::BillingEventType::SubscriptionEnded => SyncAccessMode::PausedExpired,
+        mybox_core::billing::BillingEventType::SubscriptionCanceled => {
             if matches!(event.status, SubscriptionStatus::Active) && event.cancel_at_period_end {
                 SyncAccessMode::ReadWrite
             } else {
@@ -290,7 +290,7 @@ fn validate_event(event: &BillingEvent) -> Result<(), BillingStoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use task_core::billing::{BILLING_PROTOCOL_VERSION, BillingEventType};
+    use mybox_core::billing::{BILLING_PROTOCOL_VERSION, BillingEventType};
 
     fn event(id: &str, occurred_at: u64, status: SubscriptionStatus) -> BillingEvent {
         BillingEvent {
@@ -416,8 +416,8 @@ mod tests {
             other => panic!("expected applied entitlement, got {other:?}"),
         };
         assert!(!entitlement.can_sync());
-        assert!(entitlement.can_sync_at(2_000 + task_core::billing::PAYMENT_GRACE_SECONDS));
-        assert!(!entitlement.can_sync_at(2_001 + task_core::billing::PAYMENT_GRACE_SECONDS));
+        assert!(entitlement.can_sync_at(2_000 + mybox_core::billing::PAYMENT_GRACE_SECONDS));
+        assert!(!entitlement.can_sync_at(2_001 + mybox_core::billing::PAYMENT_GRACE_SECONDS));
     }
 
     #[test]
@@ -437,7 +437,7 @@ mod tests {
             panic!("expected an applied entitlement");
         };
         assert_eq!(entitlement.current_period_end, Some(2_000));
-        assert!(entitlement.can_sync_at(2_000 + task_core::billing::PAYMENT_GRACE_SECONDS));
+        assert!(entitlement.can_sync_at(2_000 + mybox_core::billing::PAYMENT_GRACE_SECONDS));
     }
 
     #[test]
@@ -454,8 +454,8 @@ mod tests {
             panic!("expected an applied entitlement");
         };
         assert_eq!(entitlement.access_until, Some(101));
-        assert!(entitlement.can_sync_at(101 + task_core::billing::PAYMENT_GRACE_SECONDS));
-        assert!(!entitlement.can_sync_at(102 + task_core::billing::PAYMENT_GRACE_SECONDS));
+        assert!(entitlement.can_sync_at(101 + mybox_core::billing::PAYMENT_GRACE_SECONDS));
+        assert!(!entitlement.can_sync_at(102 + mybox_core::billing::PAYMENT_GRACE_SECONDS));
     }
 
     #[test]

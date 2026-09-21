@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base_url="${TASK_SPACE_ROLLOUT_URL:-${TASK_SPACE_BROWSER_URL:-}}"
+base_url="${MYBOX_ROLLOUT_URL:-${MYBOX_BROWSER_URL:-}}"
 if [[ -z "$base_url" ]]; then
-  echo "TASK_SPACE_ROLLOUT_URL or TASK_SPACE_BROWSER_URL is required" >&2
+  echo "MYBOX_ROLLOUT_URL or MYBOX_BROWSER_URL is required" >&2
   exit 2
 fi
 base_url="${base_url%/}"
@@ -13,7 +13,7 @@ if [[ "$base_url" != http://* && "$base_url" != https://* ]]; then
   exit 2
 fi
 
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/task-space-rollout.XXXXXX")"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mybox-rollout.XXXXXX")"
 cleanup() {
   rm -rf "$tmp_dir"
 }
@@ -64,10 +64,10 @@ if [[ "$(header readyz Cache-Control)" != "no-store" ]]; then
   exit 1
 fi
 
-request app "$base_url/app"
+request app "$base_url/"
 assert_status app 200
 if ! grep -qi '<html' "$tmp_dir/app.body"; then
-  echo "/app did not return an HTML document" >&2
+  echo "/ did not return an HTML document" >&2
   exit 1
 fi
 
@@ -76,7 +76,7 @@ if [[ "$(status session)" != "401" ]]; then
   echo "unauthenticated /auth/session must fail closed with HTTP 401" >&2
   exit 1
 fi
-if [[ "$(header session X-Task-Space-Error-Code)" != "SESSION_REQUIRED" ]]; then
+if [[ "$(header session X-MyBox-Error-Code)" != "SESSION_REQUIRED" ]]; then
   echo "unauthenticated /auth/session did not return SESSION_REQUIRED" >&2
   exit 1
 fi
@@ -85,18 +85,18 @@ if [[ "$(header session Cache-Control)" != "no-store" ]]; then
   exit 1
 fi
 
-if [[ -n "${TASK_SPACE_METRICS_URL:-}" ]]; then
-  if [[ -z "${TASK_SPACE_METRICS_TOKEN:-}" ]]; then
-    echo "TASK_SPACE_METRICS_TOKEN is required with TASK_SPACE_METRICS_URL" >&2
+if [[ -n "${MYBOX_METRICS_URL:-}" ]]; then
+  if [[ -z "${MYBOX_METRICS_TOKEN:-}" ]]; then
+    echo "MYBOX_METRICS_TOKEN is required with MYBOX_METRICS_URL" >&2
     exit 2
   fi
-  printf 'Authorization: Bearer %s\n' "$TASK_SPACE_METRICS_TOKEN" \
+  printf 'Authorization: Bearer %s\n' "$MYBOX_METRICS_TOKEN" \
     > "$tmp_dir/metrics.authorization"
-  request metrics "$TASK_SPACE_METRICS_URL" \
+  request metrics "$MYBOX_METRICS_URL" \
     --header "@$tmp_dir/metrics.authorization"
   assert_status metrics 200
-  if ! grep -q '^task_space_' "$tmp_dir/metrics.body"; then
-    echo "metrics endpoint did not return Task Space Prometheus metrics" >&2
+  if ! grep -q '^mybox_' "$tmp_dir/metrics.body"; then
+    echo "metrics endpoint did not return MyBox Prometheus metrics" >&2
     exit 1
   fi
 fi

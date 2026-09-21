@@ -19,12 +19,12 @@ use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use task_core::sync::{
+use mybox_core::sync::{
     SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_PROTOCOL_VERSION, SyncMetadataRequest, SyncMetadataResponse,
     SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncReconcileRequest,
     SyncReconcileResponse,
 };
-use task_core::{BoardData, EntityId};
+use mybox_core::{BoardData, EntityId};
 use tokio_stream::StreamExt;
 use url::Url;
 use uuid::Uuid;
@@ -76,7 +76,7 @@ impl IntoResponse for AuthError {
         };
         let mut response = (status, self.to_string()).into_response();
         response.headers_mut().insert(
-            axum::http::HeaderName::from_static("x-task-space-error-code"),
+            axum::http::HeaderName::from_static("x-mybox-error-code"),
             axum::http::HeaderValue::from_static(code),
         );
         response.headers_mut().insert(
@@ -506,17 +506,17 @@ async fn healthz() -> Response {
 }
 
 async fn readyz(State(state): State<HealthState>) -> Response {
-    state.metrics.inc("task_space_readiness_checks_total");
+    state.metrics.inc("mybox_readiness_checks_total");
     match sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(&state.pool)
         .await
     {
         Ok(1) => {
-            state.metrics.inc("task_space_readiness_success_total");
+            state.metrics.inc("mybox_readiness_success_total");
             health_response(StatusCode::OK, "ready")
         }
         Ok(_) | Err(_) => {
-            state.metrics.inc("task_space_readiness_failures_total");
+            state.metrics.inc("mybox_readiness_failures_total");
             health_response(StatusCode::SERVICE_UNAVAILABLE, "not_ready")
         }
     }
@@ -574,22 +574,22 @@ async fn observe_request(
     let route = metric_route(request.uri().path());
     state
         .metrics
-        .inc_labeled("task_space_http_requests_total", &[("route", route)]);
+        .inc_labeled("mybox_http_requests_total", &[("route", route)]);
     let response = next.run(request).await;
     let status = response.status().as_u16().to_string();
     state.metrics.inc_labeled(
-        "task_space_http_responses_total",
+        "mybox_http_responses_total",
         &[("route", route), ("status", &status)],
     );
     state.metrics.observe_ms_labeled(
-        "task_space_http_request_duration_ms",
+        "mybox_http_request_duration_ms",
         &[("route", route)],
         started.elapsed(),
     );
     if let Some(error_kind) = response_error_metric_kind(&response) {
         state
             .metrics
-            .inc_labeled("task_space_api_failures_total", &[("kind", error_kind)]);
+            .inc_labeled("mybox_api_failures_total", &[("kind", error_kind)]);
     }
     response
 }
@@ -616,7 +616,7 @@ fn metric_route(path: &str) -> &'static str {
 fn response_error_metric_kind(response: &Response) -> Option<&'static str> {
     let code = response
         .headers()
-        .get("x-task-space-error-code")
+        .get("x-mybox-error-code")
         .and_then(|value| value.to_str().ok())?;
     Some(match code {
         "SESSION_REQUIRED" => "auth_missing",
@@ -924,7 +924,7 @@ async fn sync_reconcile(
     let started = Instant::now();
     state
         .metrics
-        .inc("task_space_sync_reconcile_attempts_total");
+        .inc("mybox_sync_reconcile_attempts_total");
     if !state.rate_limiter.allow_account_and_ip(
         &headers,
         "sync-reconcile",
@@ -937,37 +937,37 @@ async fn sync_reconcile(
     }
     if let Ok(state_vector) = request.state_vector.to_bytes() {
         state.metrics.add(
-            "task_space_sync_state_vector_bytes_total",
+            "mybox_sync_state_vector_bytes_total",
             state_vector.len() as u64,
         );
     }
     if let Ok(update) = request.update.to_bytes() {
         state
             .metrics
-            .add("task_space_sync_update_bytes_total", update.len() as u64);
+            .add("mybox_sync_update_bytes_total", update.len() as u64);
     }
     let mut response = match state.store.reconcile(&account.account_id, &request).await {
         Ok(response) => {
-            state.metrics.inc("task_space_sync_reconcile_success_total");
+            state.metrics.inc("mybox_sync_reconcile_success_total");
             if response.event_id.is_none() {
                 state
                     .metrics
-                    .inc("task_space_sync_reconcile_without_new_event_total");
+                    .inc("mybox_sync_reconcile_without_new_event_total");
             }
             if let Ok(update) = response.update.to_bytes() {
                 state.metrics.add(
-                    "task_space_sync_response_update_bytes_total",
+                    "mybox_sync_response_update_bytes_total",
                     update.len() as u64,
                 );
             }
             if let Ok(state_vector) = response.state_vector.to_bytes() {
                 state.metrics.add(
-                    "task_space_sync_response_state_vector_bytes_total",
+                    "mybox_sync_response_state_vector_bytes_total",
                     state_vector.len() as u64,
                 );
             }
             state.metrics.observe_ms_labeled(
-                "task_space_sync_reconcile_duration_ms",
+                "mybox_sync_reconcile_duration_ms",
                 &[("outcome", "success")],
                 started.elapsed(),
             );
@@ -976,11 +976,11 @@ async fn sync_reconcile(
         Err(error) => {
             let kind = sync_error_metric_kind(&error);
             state.metrics.inc_labeled(
-                "task_space_sync_reconcile_failures_total",
+                "mybox_sync_reconcile_failures_total",
                 &[("kind", kind)],
             );
             state.metrics.observe_ms_labeled(
-                "task_space_sync_reconcile_duration_ms",
+                "mybox_sync_reconcile_duration_ms",
                 &[("outcome", kind)],
                 started.elapsed(),
             );
@@ -1022,7 +1022,7 @@ async fn sync_events(
     ) {
         return Err(ApiError::RateLimited);
     }
-    state.metrics.inc("task_space_sync_sse_connections_total");
+    state.metrics.inc("mybox_sync_sse_connections_total");
     let after_event_id = headers
         .get(axum::http::HeaderName::from_static("last-event-id"))
         .and_then(|value| value.to_str().ok())
@@ -1030,7 +1030,7 @@ async fn sync_events(
         .or(query.after_event_id)
         .unwrap_or_default();
     if after_event_id > 0 {
-        state.metrics.inc("task_space_sync_sse_reconnects_total");
+        state.metrics.inc("mybox_sync_sse_reconnects_total");
     }
     // Subscribe before reading the durable replay so a commit between those
     // two operations is present in either the replay or the live buffer.
@@ -1042,14 +1042,14 @@ async fn sync_events(
     {
         Ok(replay) => (replay, false),
         Err(PostgresStoreError::EventCursorRequiresReset) => {
-            state.metrics.inc("task_space_sync_cursor_resets_total");
+            state.metrics.inc("mybox_sync_cursor_resets_total");
             (Vec::new(), true)
         }
         Err(error) => return Err(ApiError::from(error)),
     };
     if !reset_required {
         for _ in &replay {
-            state.metrics.inc("task_space_sync_sse_replay_events_total");
+            state.metrics.inc("mybox_sync_sse_replay_events_total");
         }
     }
     let replay_events: Vec<Result<Event, Infallible>> = if reset_required {
@@ -1075,7 +1075,7 @@ async fn sync_events(
     // connection usable.
     let connection_event = tokio_stream::once(Ok::<Event, Infallible>(
         Event::default()
-            .comment("task-space-sync-connected")
+            .comment("mybox-sync-connected")
             .retry(Duration::from_secs(5)),
     ));
     let replay_stream = connection_event.chain(tokio_stream::iter(replay_events));
@@ -1368,7 +1368,7 @@ impl IntoResponse for ApiError {
         };
         let mut response = (status, message).into_response();
         response.headers_mut().insert(
-            axum::http::HeaderName::from_static("x-task-space-error-code"),
+            axum::http::HeaderName::from_static("x-mybox-error-code"),
             axum::http::HeaderValue::from_static(code),
         );
         response.headers_mut().insert(
@@ -1537,7 +1537,7 @@ mod tests {
     async fn metrics_endpoint_requires_operator_token() {
         let metrics = Metrics::default();
         metrics.inc_labeled(
-            "task_space_http_responses_total",
+            "mybox_http_responses_total",
             &[("route", "sync_reconcile"), ("status", "200")],
         );
         let state = MetricsState {

@@ -39,23 +39,23 @@ use web_sys::{RequestCredentials, Storage};
 
 use super::api::{api_url, send_with_timeout};
 
-const AUTHENTICATED_SESSION_STORAGE_KEY: &str = "task_space_authenticated_session";
-const ACTIVE_ACCOUNT_ID_STORAGE_KEY: &str = "task_space_active_account_id";
+const AUTHENTICATED_SESSION_STORAGE_KEY: &str = "mybox_authenticated_session";
+const ACTIVE_ACCOUNT_ID_STORAGE_KEY: &str = "mybox_active_account_id";
 
 thread_local! {
     static REFRESH_IN_FLIGHT: RefCell<Option<js_sys::Promise>> = const { RefCell::new(None) };
 }
 
 #[wasm_bindgen(inline_js = r#"
-const taskSpaceAuthRefreshLockKey = "task-space:auth-refresh-lock";
-const taskSpaceAuthRefreshOwner = globalThis.crypto?.randomUUID?.()
+const myboxAuthRefreshLockKey = "mybox:auth-refresh-lock";
+const myboxAuthRefreshOwner = globalThis.crypto?.randomUUID?.()
   || `${Date.now()}-${Math.random()}`;
-const taskSpaceAuthRefreshLeaseMs = 20_000;
-const taskSpaceAuthRefreshWaitMs = taskSpaceAuthRefreshLeaseMs + 2_000;
-let taskSpaceAuthRefreshLock = null;
-let taskSpaceAuthRefreshRequest = null;
+const myboxAuthRefreshLeaseMs = 20_000;
+const myboxAuthRefreshWaitMs = myboxAuthRefreshLeaseMs + 2_000;
+let myboxAuthRefreshLock = null;
+let myboxAuthRefreshRequest = null;
 
-function taskSpaceAcquireAuthRefreshStorageLock() {
+function myboxAcquireAuthRefreshStorageLock() {
   return new Promise((resolve) => {
     let storage;
     try {
@@ -68,7 +68,7 @@ function taskSpaceAcquireAuthRefreshStorageLock() {
       resolve("unavailable");
       return;
     }
-    const deadline = Date.now() + taskSpaceAuthRefreshWaitMs;
+    const deadline = Date.now() + myboxAuthRefreshWaitMs;
     const attempt = () => {
       const now = Date.now();
       if (now > deadline) {
@@ -79,22 +79,22 @@ function taskSpaceAcquireAuthRefreshStorageLock() {
         return;
       }
       try {
-        const current = JSON.parse(storage.getItem(taskSpaceAuthRefreshLockKey) || "null");
-        if (current?.owner !== taskSpaceAuthRefreshOwner && Number(current?.expiresAt) > now) {
+        const current = JSON.parse(storage.getItem(myboxAuthRefreshLockKey) || "null");
+        if (current?.owner !== myboxAuthRefreshOwner && Number(current?.expiresAt) > now) {
           setTimeout(attempt, 100);
           return;
         }
         const lease = {
-          owner: taskSpaceAuthRefreshOwner,
-          expiresAt: now + taskSpaceAuthRefreshLeaseMs,
+          owner: myboxAuthRefreshOwner,
+          expiresAt: now + myboxAuthRefreshLeaseMs,
         };
-        storage.setItem(taskSpaceAuthRefreshLockKey, JSON.stringify(lease));
-        const verified = JSON.parse(storage.getItem(taskSpaceAuthRefreshLockKey) || "null");
+        storage.setItem(myboxAuthRefreshLockKey, JSON.stringify(lease));
+        const verified = JSON.parse(storage.getItem(myboxAuthRefreshLockKey) || "null");
         if (verified?.owner !== lease.owner) {
           setTimeout(attempt, 100);
           return;
         }
-        taskSpaceAuthRefreshLock = { owner: lease.owner, storage: true };
+        myboxAuthRefreshLock = { owner: lease.owner, storage: true };
         resolve("acquired");
       } catch (_) {
         resolve("unavailable");
@@ -104,24 +104,24 @@ function taskSpaceAcquireAuthRefreshStorageLock() {
   });
 }
 
-function taskSpaceAcquireAuthRefreshWebLock() {
+function myboxAcquireAuthRefreshWebLock() {
   const locks = globalThis.navigator?.locks;
   if (!locks || typeof locks.request !== "function") return Promise.resolve(false);
   return new Promise((resolve) => {
-    const deadline = Date.now() + taskSpaceAuthRefreshWaitMs;
+    const deadline = Date.now() + myboxAuthRefreshWaitMs;
     const attempt = () => {
       if (Date.now() > deadline) {
         resolve(false);
         return;
       }
-      locks.request("task-space-auth-refresh", { mode: "exclusive", ifAvailable: true }, (lock) => {
+      locks.request("mybox-auth-refresh", { mode: "exclusive", ifAvailable: true }, (lock) => {
         if (!lock) {
           setTimeout(attempt, 100);
           return undefined;
         }
         let release;
         const hold = new Promise((releaseLock) => { release = releaseLock; });
-        taskSpaceAuthRefreshLock = { release, storage: false };
+        myboxAuthRefreshLock = { release, storage: false };
         resolve(true);
         return hold;
       }).catch(() => resolve(false));
@@ -130,49 +130,49 @@ function taskSpaceAcquireAuthRefreshWebLock() {
   });
 }
 
-export function taskSpaceAcquireAuthRefreshLock() {
-  if (taskSpaceAuthRefreshLock) return Promise.resolve(true);
-  if (taskSpaceAuthRefreshRequest) return taskSpaceAuthRefreshRequest;
-  const promise = taskSpaceAcquireAuthRefreshStorageLock().then((result) => {
+export function myboxAcquireAuthRefreshLock() {
+  if (myboxAuthRefreshLock) return Promise.resolve(true);
+  if (myboxAuthRefreshRequest) return myboxAuthRefreshRequest;
+  const promise = myboxAcquireAuthRefreshStorageLock().then((result) => {
     if (result === "acquired") return true;
     if (result === "busy") return false;
     // Storage can be denied in private/restricted profiles. Native Web Locks
     // remain useful there, but ifAvailable plus a deadline prevents a frozen
     // tab from blocking authentication forever.
     if (globalThis.navigator?.locks?.request) {
-      return taskSpaceAcquireAuthRefreshWebLock();
+      return myboxAcquireAuthRefreshWebLock();
     }
     // There is no cross-tab primitive left. Preserve the old best-effort
     // behavior for this exceptional profile while keeping the normal path
     // serialized by the expiring storage lease.
-    taskSpaceAuthRefreshLock = { storage: false, bestEffort: true };
+    myboxAuthRefreshLock = { storage: false, bestEffort: true };
     return true;
   });
-  taskSpaceAuthRefreshRequest = promise;
+  myboxAuthRefreshRequest = promise;
   promise.finally(() => {
-    if (taskSpaceAuthRefreshRequest === promise) taskSpaceAuthRefreshRequest = null;
+    if (myboxAuthRefreshRequest === promise) myboxAuthRefreshRequest = null;
   });
   return promise;
 }
 
-export function taskSpaceReleaseAuthRefreshLock() {
-  const lock = taskSpaceAuthRefreshLock;
-  taskSpaceAuthRefreshLock = null;
+export function myboxReleaseAuthRefreshLock() {
+  const lock = myboxAuthRefreshLock;
+  myboxAuthRefreshLock = null;
   if (lock?.storage) {
     try {
       const storage = globalThis.localStorage;
-      const current = JSON.parse(storage?.getItem(taskSpaceAuthRefreshLockKey) || "null");
-      if (current?.owner === lock.owner) storage?.removeItem(taskSpaceAuthRefreshLockKey);
+      const current = JSON.parse(storage?.getItem(myboxAuthRefreshLockKey) || "null");
+      if (current?.owner === lock.owner) storage?.removeItem(myboxAuthRefreshLockKey);
     } catch (_) {}
   }
   if (typeof lock?.release === "function") lock.release();
 }
 "#)]
 extern "C" {
-    #[wasm_bindgen(js_name = taskSpaceAcquireAuthRefreshLock)]
+    #[wasm_bindgen(js_name = myboxAcquireAuthRefreshLock)]
     fn acquire_auth_refresh_lock() -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = taskSpaceReleaseAuthRefreshLock)]
+    #[wasm_bindgen(js_name = myboxReleaseAuthRefreshLock)]
     fn release_auth_refresh_lock();
 }
 

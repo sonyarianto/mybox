@@ -33,7 +33,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(task_space_http_responses_total{status=~\"5..\"}[5m]))",
+          "expr": "sum(rate(mybox_http_responses_total{status=~\"5..\"}[5m]))",
           "legendFormat": "5xx/s",
           "refId": "A"
         }
@@ -58,7 +58,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (status) (rate(task_space_http_responses_total[5m]))",
+          "expr": "sum by (status) (rate(mybox_http_responses_total[5m]))",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -83,12 +83,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(task_space_sync_reconcile_success_total[5m]))",
+          "expr": "sum(rate(mybox_sync_reconcile_success_total[5m]))",
           "legendFormat": "success/s",
           "refId": "A"
         },
         {
-          "expr": "sum by (kind) (rate(task_space_sync_reconcile_failures_total[5m]))",
+          "expr": "sum by (kind) (rate(mybox_sync_reconcile_failures_total[5m]))",
           "legendFormat": "failure: {{kind}}",
           "refId": "B"
         }
@@ -113,12 +113,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(task_space_sync_reconcile_duration_ms_bucket{outcome=\"success\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mybox_sync_reconcile_duration_ms_bucket{outcome=\"success\"}[5m])))",
           "legendFormat": "p95 success",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(task_space_sync_reconcile_duration_ms_sum{outcome=\"success\"}[5m])) / clamp_min(sum(rate(task_space_sync_reconcile_duration_ms_count{outcome=\"success\"}[5m])), 1)",
+          "expr": "sum(rate(mybox_sync_reconcile_duration_ms_sum{outcome=\"success\"}[5m])) / clamp_min(sum(rate(mybox_sync_reconcile_duration_ms_count{outcome=\"success\"}[5m])), 1)",
           "legendFormat": "average success",
           "refId": "B"
         }
@@ -143,17 +143,17 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(increase(task_space_sync_sse_reconnects_total[1h]))",
+          "expr": "sum(increase(mybox_sync_sse_reconnects_total[1h]))",
           "legendFormat": "reconnects/hour",
           "refId": "A"
         },
         {
-          "expr": "sum(increase(task_space_sync_cursor_resets_total[1h]))",
+          "expr": "sum(increase(mybox_sync_cursor_resets_total[1h]))",
           "legendFormat": "cursor resets/hour",
           "refId": "B"
         },
         {
-          "expr": "sum(increase(task_space_sync_sse_replay_events_total[1h]))",
+          "expr": "sum(increase(mybox_sync_sse_replay_events_total[1h]))",
           "legendFormat": "replay events/hour",
           "refId": "C"
         }
@@ -178,12 +178,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(increase(task_space_readiness_failures_total[1h]))",
+          "expr": "sum(increase(mybox_readiness_failures_total[1h]))",
           "legendFormat": "readiness failures/hour",
           "refId": "A"
         },
         {
-          "expr": "sum(increase(task_space_webhook_failures_total[1h]))",
+          "expr": "sum(increase(mybox_webhook_failures_total[1h]))",
           "legendFormat": "webhook failures/hour",
           "refId": "B"
         }
@@ -208,17 +208,17 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(increase(task_space_sync_compaction_runs_total[6h]))",
+          "expr": "sum(increase(mybox_sync_compaction_runs_total[6h]))",
           "legendFormat": "compaction runs/6h",
           "refId": "A"
         },
         {
-          "expr": "sum(increase(task_space_sync_compaction_failures_total[6h]))",
+          "expr": "sum(increase(mybox_sync_compaction_failures_total[6h]))",
           "legendFormat": "compaction failures/6h",
           "refId": "B"
         },
         {
-          "expr": "sum(increase(task_space_sync_retention_failures_total[6h]))",
+          "expr": "sum(increase(mybox_sync_retention_failures_total[6h]))",
           "legendFormat": "retention failures/6h",
           "refId": "C"
         }
@@ -243,17 +243,17 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(task_space_sync_update_bytes_total[5m]))",
+          "expr": "sum(rate(mybox_sync_update_bytes_total[5m]))",
           "legendFormat": "updates bytes/s",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(task_space_sync_response_update_bytes_total[5m]))",
+          "expr": "sum(rate(mybox_sync_response_update_bytes_total[5m]))",
           "legendFormat": "response update bytes/s",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(task_space_sync_response_state_vector_bytes_total[5m]))",
+          "expr": "sum(rate(mybox_sync_response_state_vector_bytes_total[5m]))",
           "legendFormat": "state vector bytes/s",
           "refId": "C"
         }
@@ -263,7 +263,7 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": [
-    "task-space",
+    "mybox",
     "sync",
     "auth",
     "billing"
@@ -275,7 +275,7 @@
     "from": "now-6h",
     "to": "now"
   },
-  "title": "Task Space Sync / Auth / Billing",
-  "uid": "task-space-sync",
+  "title": "MyBox Sync / Auth / Billing",
+  "uid": "mybox-sync",
   "version": 1
 }

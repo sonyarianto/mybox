@@ -19,7 +19,7 @@ RUN set -eu; \
             -e "s|/snippets/${snippet_name}/inline0.js\"|/snippets/${snippet_name}/inline0.js?v=${snippet_version}\"|g" \
             -e "s|/snippets/${snippet_name}/inline1.js\"|/snippets/${snippet_name}/inline1.js?v=${snippet_version}\"|g" {} +; \
     done; \
-    for js_file in /usr/share/nginx/html/task-web-*.js; do \
+    for js_file in /usr/share/nginx/html/mybox-web-*.js; do \
         [ -f "$js_file" ] || continue; \
         js_name="$(basename "$js_file")"; \
         js_stem="${js_name%.js}"; \
@@ -33,7 +33,7 @@ RUN set -eu; \
         # and the snippet modules retain their own verified SRI attributes. \
         sed -i "s|href=\"/${versioned_js_name}\" crossorigin=\"anonymous\" integrity=\"sha384-[^\"]*\"|href=\"/${versioned_js_name}\" crossorigin=\"anonymous\"|g" /usr/share/nginx/html/index.html; \
     done; \
-    for wasm_file in /usr/share/nginx/html/task-web-*_bg.wasm; do \
+    for wasm_file in /usr/share/nginx/html/mybox-web-*_bg.wasm; do \
         [ -f "$wasm_file" ] || continue; \
         wasm_name="$(basename "$wasm_file")"; \
         wasm_stem="${wasm_name%.wasm}"; \

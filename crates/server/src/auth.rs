@@ -52,10 +52,10 @@ impl LocalAuthConfig {
     pub fn from_env() -> Result<Self, AuthError> {
         let cookie_name = std::env::var("AUTH_SESSION_COOKIE")
             .or_else(|_| std::env::var("WORKOS_SESSION_COOKIE"))
-            .unwrap_or_else(|_| "task_space_session".to_owned());
+            .unwrap_or_else(|_| "mybox_session".to_owned());
         let post_login_redirect = std::env::var("AUTH_POST_LOGIN_REDIRECT")
             .or_else(|_| std::env::var("WORKOS_POST_LOGIN_REDIRECT_URI"))
-            .unwrap_or_else(|_| "/app".to_owned());
+            .unwrap_or_else(|_| "/".to_owned());
         let session_ttl_secs = std::env::var("AUTH_SESSION_TTL_SECS")
             .ok()
             .and_then(|v| v.parse::<i64>().ok())
@@ -838,7 +838,7 @@ async fn fetch_oauth_identity(
                 .inner
                 .client
                 .get("https://api.github.com/user")
-                .header("User-Agent", "task-space")
+                .header("User-Agent", "mybox")
                 .bearer_auth(access)
                 .send()
                 .await
@@ -860,7 +860,7 @@ async fn fetch_oauth_identity(
                     .inner
                     .client
                     .get("https://api.github.com/user/emails")
-                    .header("User-Agent", "task-space")
+                    .header("User-Agent", "mybox")
                     .bearer_auth(access)
                     .send()
                     .await

@@ -5,15 +5,15 @@ set -euo pipefail
 # restart them and verify the protected service recovers. This is deliberately
 # scoped to named local containers; production process-kill experiments need
 # the deployment owner's change window and observability controls.
-if [[ "${TASK_SPACE_CHAOS_CONFIRM:-}" != "I_UNDERSTAND_LOCAL_KILL_TEST" ]]; then
-  printf '%s\n' 'Refusing to kill containers without TASK_SPACE_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_KILL_TEST.' >&2
+if [[ "${MYBOX_CHAOS_CONFIRM:-}" != "I_UNDERSTAND_LOCAL_KILL_TEST" ]]; then
+  printf '%s\n' 'Refusing to kill containers without MYBOX_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_KILL_TEST.' >&2
   exit 2
 fi
 
-api_container="${TASK_SPACE_KILL_API_CONTAINER:-task-space-chaos-acceptance}"
-database_container="${TASK_SPACE_KILL_DATABASE_CONTAINER:-deploy-postgres-1}"
-api_url="${TASK_SPACE_KILL_API_URL:-http://127.0.0.1:3300}"
-deadline_seconds="${TASK_SPACE_KILL_TIMEOUT_SECONDS:-60}"
+api_container="${MYBOX_KILL_API_CONTAINER:-mybox-chaos-acceptance}"
+database_container="${MYBOX_KILL_DATABASE_CONTAINER:-deploy-postgres-1}"
+api_url="${MYBOX_KILL_API_URL:-http://127.0.0.1:3300}"
+deadline_seconds="${MYBOX_KILL_TIMEOUT_SECONDS:-60}"
 
 request_status() {
   local url="$1"

@@ -1,18 +1,18 @@
 groups:
-  - name: task-space-sync
+  - name: mybox-sync
     rules:
-      - alert: TaskSpaceApi5xx
-        expr: sum(rate(task_space_http_responses_total{status=~"5.."}[5m])) > 0
+      - alert: MyBoxApi5xx
+        expr: sum(rate(mybox_http_responses_total{status=~"5.."}[5m])) > 0
         for: 10m
         labels:
           severity: page
           owner: sync-service
         annotations:
-          summary: Task Space API is returning 5xx responses
+          summary: MyBox API is returning 5xx responses
           description: The API has returned 5xx responses continuously for 10 minutes.
 
-      - alert: TaskSpaceSyncReconcileFailures
-        expr: sum(rate(task_space_sync_reconcile_failures_total[10m])) > 0
+      - alert: MyBoxSyncReconcileFailures
+        expr: sum(rate(mybox_sync_reconcile_failures_total[10m])) > 0
         for: 15m
         labels:
           severity: ticket
@@ -21,8 +21,8 @@ groups:
           summary: Sync reconciliation failures are sustained
           description: Reconciliation failures have been observed continuously for 15 minutes.
 
-      - alert: TaskSpaceSyncCursorResets
-        expr: sum(increase(task_space_sync_cursor_resets_total[1h])) > 25
+      - alert: MyBoxSyncCursorResets
+        expr: sum(increase(mybox_sync_cursor_resets_total[1h])) > 25
         for: 10m
         labels:
           severity: ticket
@@ -31,8 +31,8 @@ groups:
           summary: Many clients are requiring full sync resets
           description: Investigate event retention, SSE delivery, and database latency.
 
-      - alert: TaskSpaceApiRateLimited
-        expr: sum(rate(task_space_http_responses_total{status="429"}[10m])) > 1
+      - alert: MyBoxApiRateLimited
+        expr: sum(rate(mybox_http_responses_total{status="429"}[10m])) > 1
         for: 15m
         labels:
           severity: ticket
@@ -41,18 +41,18 @@ groups:
           summary: API rate limiting is sustained
           description: Check abusive clients, account hot spots, and limiter sizing before raising limits.
 
-      - alert: TaskSpaceReadinessFailures
-        expr: increase(task_space_readiness_failures_total[10m]) > 0
+      - alert: MyBoxReadinessFailures
+        expr: increase(mybox_readiness_failures_total[10m]) > 0
         for: 5m
         labels:
           severity: page
           owner: database
         annotations:
-          summary: Task Space is failing database-backed readiness checks
+          summary: MyBox is failing database-backed readiness checks
           description: Investigate PostgreSQL availability, disk pressure, recovery state, and connection exhaustion.
 
-      - alert: TaskSpaceAuthFailures
-        expr: sum(rate(task_space_api_failures_total{kind=~"auth_.*"}[10m])) > 0
+      - alert: MyBoxAuthFailures
+        expr: sum(rate(mybox_api_failures_total{kind=~"auth_.*"}[10m])) > 0
         for: 10m
         labels:
           severity: ticket
@@ -61,8 +61,8 @@ groups:
           summary: Local auth failures are sustained
           description: Check signup/signin rate limits, session expiry, and OAuth provider reachability.
 
-      - alert: TaskSpaceCompactionStalled
-        expr: increase(task_space_sync_compaction_runs_total[2h]) == 0
+      - alert: MyBoxCompactionStalled
+        expr: increase(mybox_sync_compaction_runs_total[2h]) == 0
         for: 30m
         labels:
           severity: ticket

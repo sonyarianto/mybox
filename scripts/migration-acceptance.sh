@@ -7,15 +7,15 @@ set -euo pipefail
 # are exercised before the normal durable-sync acceptance test runs.
 repo_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-acceptance_network="${TASK_SPACE_MIGRATION_NETWORK:-task-space-migration-${run_id}}"
-database_container="${TASK_SPACE_MIGRATION_CONTAINER:-task-space-migration-postgres-${run_id}}"
-database_volume="${TASK_SPACE_MIGRATION_VOLUME:-task-space-migration-postgres-data-${run_id}}"
+acceptance_network="${MYBOX_MIGRATION_NETWORK:-mybox-migration-${run_id}}"
+database_container="${MYBOX_MIGRATION_CONTAINER:-mybox-migration-postgres-${run_id}}"
+database_volume="${MYBOX_MIGRATION_VOLUME:-mybox-migration-postgres-data-${run_id}}"
 database_user="restore"
 database_password="restore-local-only"
-database_name="taskspace"
+database_name="mybox"
 database_url="postgres://${database_user}:${database_password}@${database_container}:5432/${database_name}"
-sized_space_count="${TASK_SPACE_MIGRATION_SIZED_SPACES:-1000}"
-sized_update_count="${TASK_SPACE_MIGRATION_SIZED_UPDATES:-10000}"
+sized_space_count="${MYBOX_MIGRATION_SIZED_SPACES:-1000}"
+sized_update_count="${MYBOX_MIGRATION_SIZED_UPDATES:-10000}"
 migration_started_at=$SECONDS
 
 [[ "$sized_space_count" =~ ^[1-9][0-9]*$ ]]
@@ -52,23 +52,23 @@ run_postgres_test() {
   docker run --rm \
     --network "$acceptance_network" \
     --volume "$repo_dir:/src" \
-    --volume task-space-rust-target:/src/target \
-    --volume task-space-rust-cargo:/cargo-cache \
-    --volume task-space-rustup:/rustup-cache \
+    --volume mybox-rust-target:/src/target \
+    --volume mybox-rust-cargo:/cargo-cache \
+    --volume mybox-rustup:/rustup-cache \
     --workdir /src \
     --env CARGO_HOME=/cargo-cache \
     --env RUSTUP_HOME=/rustup-cache \
     --env RUSTUP_TOOLCHAIN=1.96.0 \
-    --env TASK_SPACE_TEST_DATABASE_URL="$target_url" \
+    --env MYBOX_TEST_DATABASE_URL="$target_url" \
     rust:1.96-bookworm \
-    sh -ceu 'cargo test -p task-server --test postgres_sync -- --ignored --nocapture'
+    sh -ceu 'cargo test -p mybox-server --test postgres_sync -- --ignored --nocapture'
 }
 
 # This starts with an entirely empty database, so the test's store.migrate()
 # applies every migration from 0001 through the current version.
 run_postgres_test "$database_url"
 
-legacy_database="legacy_taskspace"
+legacy_database="legacy_mybox"
 docker exec "$database_container" psql -U "$database_user" -d postgres -v ON_ERROR_STOP=1 \
   -c "CREATE DATABASE ${legacy_database}"
 legacy_url="postgres://${database_user}:${database_password}@${database_container}:5432/${legacy_database}"

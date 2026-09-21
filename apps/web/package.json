@@ -1,5 +1,5 @@
 {
-  "name": "task-web-assets",
+  "name": "mybox-web-assets",
   "private": true,
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

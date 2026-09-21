@@ -1,6 +1,6 @@
-taskspace.smbl.dev {
+mybox.smbl.dev {
 	encode gzip zstd
-	reverse_proxy task-space:80
+	reverse_proxy mybox:80
 }
 
 http://167.233.72.182 {

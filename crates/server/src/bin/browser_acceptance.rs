@@ -14,12 +14,12 @@ use async_trait::async_trait;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, RETRY_AFTER};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::middleware;
-use task_server::http::{
+use mybox_server::http::{
     AuthError, AuthenticatedAccount, RequestRateLimiter, SessionVerifier, SyncHttpState,
     add_request_id, health_router, metrics_router, protected_sync_router,
 };
-use task_server::metrics::Metrics;
-use task_server::postgres::PostgresSyncStore;
+use mybox_server::metrics::Metrics;
+use mybox_server::postgres::PostgresSyncStore;
 use tokio::sync::RwLock;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
@@ -54,7 +54,7 @@ async fn main() {
         .migrate()
         .await
         .expect("browser acceptance migrations should apply");
-    let account_id = std::env::var("TASK_SPACE_BROWSER_TEST_ACCOUNT")
+    let account_id = std::env::var("MYBOX_BROWSER_TEST_ACCOUNT")
         .unwrap_or_else(|_| format!("browser-acceptance-{}", Uuid::new_v4()));
 
     let verifier = TestVerifier::default();
@@ -67,7 +67,7 @@ async fn main() {
         },
     );
 
-    let origin = std::env::var("TASK_SPACE_BROWSER_TEST_ORIGIN")
+    let origin = std::env::var("MYBOX_BROWSER_TEST_ORIGIN")
         .unwrap_or_else(|_| "http://127.0.0.1:3301".to_owned());
     let metrics = Metrics::default();
     let app = health_router(store.pool().clone(), metrics.clone())
@@ -75,7 +75,7 @@ async fn main() {
         .merge(protected_sync_router(SyncHttpState {
             store,
             verifier: Arc::new(verifier),
-            session_cookie_name: "task_space_session".to_owned(),
+            session_cookie_name: "mybox_session".to_owned(),
             allowed_origins: Arc::new(vec![origin.clone()]),
             rate_limiter: RequestRateLimiter::default(),
             metrics,
@@ -96,21 +96,19 @@ async fn main() {
                 ])
                 .expose_headers([
                     HeaderName::from_static("x-request-id"),
-                    HeaderName::from_static("x-task-space-error-code"),
+                    HeaderName::from_static("x-mybox-error-code"),
                     RETRY_AFTER,
                 ])
                 .allow_credentials(true),
         )
         .layer(middleware::from_fn(add_request_id));
 
-    let static_dir = std::env::var_os("TASK_SPACE_BROWSER_STATIC_DIR")
+    let static_dir = std::env::var_os("MYBOX_BROWSER_STATIC_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("apps/web/dist"));
     let index = static_dir.join("index.html");
     let app = app
         .route_service("/", ServeFile::new(index.clone()))
-        .route_service("/app", ServeFile::new(index.clone()))
-        .route_service("/app/", ServeFile::new(index))
         .fallback_service(ServeDir::new(static_dir));
     let port = std::env::var("PORT")
         .ok()
@@ -121,7 +119,7 @@ async fn main() {
         .await
         .expect("browser acceptance server should bind");
     println!(
-        "browser acceptance server listening on http://127.0.0.1:{port}/app account={account_id} session_cookie={TEST_SESSION_COOKIE}"
+        "browser acceptance server listening on http://127.0.0.1:{port}/ account={account_id} session_cookie={TEST_SESSION_COOKIE}"
     );
     axum::serve(listener, app)
         .await

@@ -8,7 +8,7 @@ ALTER TABLE spaces
 -- value derived from the account and legacy id gives every replica the same
 -- identity without renumbering data or depending on a clock.
 UPDATE spaces
-SET stable_id = md5('task-space:space:' || account_id || ':' || space_id::TEXT)::UUID
+SET stable_id = md5('mybox:space:' || account_id || ':' || space_id::TEXT)::UUID
 WHERE stable_id IS NULL;
 
 ALTER TABLE spaces

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 backup_path="${1:?usage: restore-postgres.sh BACKUP.dump}"
-database_url="${TASK_SPACE_RESTORE_DATABASE_URL:?TASK_SPACE_RESTORE_DATABASE_URL must name the restore target}"
-confirmation="${TASK_SPACE_RESTORE_CONFIRM:-}"
+database_url="${MYBOX_RESTORE_DATABASE_URL:?MYBOX_RESTORE_DATABASE_URL must name the restore target}"
+confirmation="${MYBOX_RESTORE_CONFIRM:-}"
 
 if [[ "$confirmation" != "I_UNDERSTAND_RESTORE_IS_DESTRUCTIVE" ]]; then
-  printf '%s\n' 'Refusing to restore without TASK_SPACE_RESTORE_CONFIRM=I_UNDERSTAND_RESTORE_IS_DESTRUCTIVE.' >&2
+  printf '%s\n' 'Refusing to restore without MYBOX_RESTORE_CONFIRM=I_UNDERSTAND_RESTORE_IS_DESTRUCTIVE.' >&2
   exit 2
 fi
 

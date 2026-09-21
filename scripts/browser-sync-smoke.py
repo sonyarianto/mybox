@@ -31,8 +31,8 @@ from playwright.sync_api import BrowserContext, Page, TimeoutError, sync_playwri
 
 
 def wait_for_board(page: Page, authenticated: bool = False) -> None:
-    page.locator("#task-space-board").wait_for(state="visible", timeout=15_000)
-    page.get_by_text("Task Space", exact=True).wait_for(state="visible", timeout=15_000)
+    page.locator("#mybox-board").wait_for(state="visible", timeout=15_000)
+    page.get_by_text("MyBox", exact=True).wait_for(state="visible", timeout=15_000)
     # Finish the unauthenticated account check before taking the context
     # offline. Otherwise the test can intentionally interrupt that request
     # and leave the board behind its temporary "account check unavailable"
@@ -112,7 +112,7 @@ def read_sync_records(page: Page) -> list[dict[str, Any]]:
     return page.evaluate(
         """
         () => new Promise((resolve, reject) => {
-          const request = indexedDB.open("task-space");
+          const request = indexedDB.open("mybox");
           request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
           request.onsuccess = () => {
             const db = request.result;
@@ -141,7 +141,7 @@ def seed_session_cookie(
     context.add_cookies(
         [
             {
-                "name": "task_space_session",
+                "name": "mybox_session",
                 "value": session_cookie,
                 "domain": parsed_url.hostname,
                 "path": "/",
@@ -155,7 +155,7 @@ def seed_session_cookie(
 def seed_authenticated_namespace(context: BrowserContext, account_id: str | None) -> None:
     """Start a disposable authenticated run in its account namespace.
 
-    Real sign-in flows populate these markers before redirecting to `/app`.
+    Real sign-in flows populate these markers before redirecting to `/`.
     The deterministic browser acceptance server seeds the cookie directly, so
     it supplies the same post-login marker to avoid exercising guest-adoption
     UI during a server-convergence test.
@@ -166,8 +166,8 @@ def seed_authenticated_namespace(context: BrowserContext, account_id: str | None
     context.add_init_script(
         f"""
         try {{
-          localStorage.setItem("task_space_authenticated_session", "true");
-          localStorage.setItem("task_space_active_account_id", {encoded_account_id});
+          localStorage.setItem("mybox_authenticated_session", "true");
+          localStorage.setItem("mybox_active_account_id", {encoded_account_id});
         }} catch (_) {{}}
         """
     )
@@ -186,8 +186,8 @@ def wait_for_authenticated_outbox_empty(
               if (!moduleUrl) throw new Error("could not locate sync IndexedDB module");
               const syncModule = await import(moduleUrl);
               return {
-                crdt: await syncModule.taskSpaceLoadCrdtUpdates(),
-                metadata: await syncModule.taskSpaceLoadMetadataUpdates(),
+                crdt: await syncModule.myboxLoadCrdtUpdates(),
+                metadata: await syncModule.myboxLoadMetadataUpdates(),
               };
             }
             """
@@ -234,7 +234,7 @@ def read_workspace_record(page: Page, principal: str) -> Any:
     return page.evaluate(
         """
         (key) => new Promise((resolve, reject) => {
-          const request = indexedDB.open("task-space");
+          const request = indexedDB.open("mybox");
           request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
           request.onsuccess = () => {
             const db = request.result;
@@ -263,7 +263,7 @@ def assert_inbox_ack_is_scoped(page: Page) -> None:
           if (!moduleUrl) throw new Error("could not locate sync IndexedDB module");
           const syncModule = await import(moduleUrl);
           const openDb = () => new Promise((resolve, reject) => {
-            const request = indexedDB.open("task-space");
+            const request = indexedDB.open("mybox");
             request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
             request.onsuccess = () => resolve(request.result);
           });
@@ -282,8 +282,8 @@ def assert_inbox_ack_is_scoped(page: Page) -> None:
           const source = `browser-smoke-inbox-${crypto.randomUUID()}`;
           const acknowledgedGeneration = 7001;
           const retainedGeneration = 7002;
-          await syncModule.taskSpaceSetSyncPrincipal(record.principal);
-          const originalWorkspaceRaw = await syncModule.taskSpaceLoadWorkspace();
+          await syncModule.myboxSetSyncPrincipal(record.principal);
+          const originalWorkspaceRaw = await syncModule.myboxLoadWorkspace();
           const originalWorkspace = JSON.parse(originalWorkspaceRaw);
           const manifestProjection = {
             ...originalWorkspace,
@@ -293,10 +293,10 @@ def assert_inbox_ack_is_scoped(page: Page) -> None:
               board: { schema_version: 3, notes: [], groups: [], tombstones: [] },
             })),
           };
-          await syncModule.taskSpaceSaveWorkspace(
+          await syncModule.myboxSaveWorkspace(
             JSON.stringify(manifestProjection), record.principal,
           );
-          const mergedWorkspace = JSON.parse(await syncModule.taskSpaceLoadWorkspace());
+          const mergedWorkspace = JSON.parse(await syncModule.myboxLoadWorkspace());
           const originalBoardItems = (originalWorkspace.spaces || [])
             .reduce((count, space) => count + (space.board?.notes?.length || 0)
               + (space.board?.groups?.length || 0), 0);
@@ -306,14 +306,14 @@ def assert_inbox_ack_is_scoped(page: Page) -> None:
           if (originalBoardItems > 0 && mergedBoardItems === 0) {
             throw new Error("empty manifest projection erased populated local boards");
           }
-          await syncModule.taskSpaceSaveWorkspace(originalWorkspaceRaw, record.principal);
-          await syncModule.taskSpaceQueueIncomingCrdtUpdate(
+          await syncModule.myboxSaveWorkspace(originalWorkspaceRaw, record.principal);
+          await syncModule.myboxQueueIncomingCrdtUpdate(
             record.principal, record.spaceId, source, acknowledgedGeneration, "AA",
           );
-          await syncModule.taskSpaceQueueIncomingCrdtUpdate(
+          await syncModule.myboxQueueIncomingCrdtUpdate(
             record.principal, record.spaceId, source, retainedGeneration, "AQ",
           );
-          await syncModule.taskSpaceSaveCrdt(
+          await syncModule.myboxSaveCrdt(
             record.principal,
             record.spaceId,
             record.snapshot,
@@ -359,12 +359,12 @@ def assert_coordinator_fencing_liveness(first: Page, second: Page) -> None:
         if (!moduleUrl) throw new Error("could not locate sync transport module");
         const syncModule = await import(moduleUrl);
         if (action === "acquire") {
-          return await syncModule.taskSpaceAcquireSyncLease(principal);
+          return await syncModule.myboxAcquireSyncLease(principal);
         }
         if (action === "owner") {
-          return syncModule.taskSpaceIsSyncLeaseOwner(principal);
+          return syncModule.myboxIsSyncLeaseOwner(principal);
         }
-        syncModule.taskSpaceReleaseSyncLease(principal);
+        syncModule.myboxReleaseSyncLease(principal);
         return true;
       }
     """
@@ -418,7 +418,7 @@ def corrupt_snapshot(page: Page, record: dict[str, Any]) -> None:
     page.evaluate(
         """
         ({recordKey, crdtKey}) => new Promise((resolve, reject) => {
-          const request = indexedDB.open("task-space");
+          const request = indexedDB.open("mybox");
           request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
           request.onsuccess = () => {
             const db = request.result;
@@ -464,7 +464,7 @@ def assert_local_storage_backup_export(page: Page, principal: str) -> None:
               if (!moduleUrl) return { ok: false, error: "module not found" };
               try {
                 const module = await import(moduleUrl);
-                const raw = await module.taskSpaceExportIndexedDbBackup(principal);
+                const raw = await module.myboxExportIndexedDbBackup(principal);
                 return { ok: true, length: String(raw || "").length };
               } catch (exportError) {
                 return { ok: false, error: String(exportError) };
@@ -479,7 +479,7 @@ def assert_local_storage_backup_export(page: Page, principal: str) -> None:
             + f"\nexport probe: {export_probe!r}"
         ) from error
 
-    if payload.get("format") != "task-space-indexeddb-backup":
+    if payload.get("format") != "mybox-indexeddb-backup":
         raise AssertionError(f"unexpected local backup format: {payload!r}")
     if payload.get("principal") != principal:
         raise AssertionError(f"local backup principal mismatch: {payload!r}")
@@ -501,7 +501,7 @@ def assert_sync_diagnostics_export(page: Page) -> None:
     if path is None:
         raise AssertionError("sync diagnostics download did not expose a temporary path")
     payload = json.loads(Path(path).read_text())
-    if payload.get("format") != "task-space-sync-diagnostics":
+    if payload.get("format") != "mybox-sync-diagnostics":
         raise AssertionError(f"unexpected sync diagnostics format: {payload!r}")
     for key in ("principal", "activeSpaceId", "status", "pendingCount", "local", "transport"):
         if key not in payload:
@@ -535,13 +535,13 @@ def assert_broadcast_channel_delivery(first: Page, second: Page) -> tuple[str | 
     # The app includes the namespace and principal in the channel name so a
     # principal switch cannot receive an older account's payloads.
     channel_name = f"1:{principal}:{principal}"
-    storage_key = f"task-space.local-sync.v1:{principal}"
+    storage_key = f"mybox.local-sync.v1:{principal}"
     has_broadcast_channel = second.evaluate("() => typeof BroadcastChannel === 'function'")
     if has_broadcast_channel:
         second.evaluate(
             """
             (name) => {
-              window.__taskSpaceChannelProbe = new Promise((resolve) => {
+              window.__myboxChannelProbe = new Promise((resolve) => {
                 const channel = new BroadcastChannel(name);
                 channel.onmessage = (event) => {
                   channel.close();
@@ -556,7 +556,7 @@ def assert_broadcast_channel_delivery(first: Page, second: Page) -> tuple[str | 
             """
             (name) => {
               const channel = new BroadcastChannel(name);
-              channel.postMessage("task-space-browser-smoke");
+              channel.postMessage("mybox-browser-smoke");
               channel.close();
             }
             """,
@@ -565,7 +565,7 @@ def assert_broadcast_channel_delivery(first: Page, second: Page) -> tuple[str | 
         delivered = second.evaluate(
             """
             async () => Promise.race([
-              window.__taskSpaceChannelProbe,
+              window.__myboxChannelProbe,
               new Promise((resolve) => setTimeout(() => resolve(null), 3_000)),
             ])
             """
@@ -574,9 +574,9 @@ def assert_broadcast_channel_delivery(first: Page, second: Page) -> tuple[str | 
         second.evaluate(
             """
             (key) => {
-              window.__taskSpaceStorageProbe = new Promise((resolve) => {
+              window.__myboxStorageProbe = new Promise((resolve) => {
                 window.addEventListener("storage", (event) => {
-                  if (event.key === key && event.newValue === "task-space-browser-smoke") {
+                  if (event.key === key && event.newValue === "mybox-browser-smoke") {
                     resolve(event.newValue);
                   }
                 }, { once: true });
@@ -587,29 +587,29 @@ def assert_broadcast_channel_delivery(first: Page, second: Page) -> tuple[str | 
         )
         first.evaluate(
             """
-            (key) => localStorage.setItem(key, "task-space-browser-smoke")
+            (key) => localStorage.setItem(key, "mybox-browser-smoke")
             """,
             storage_key,
         )
         delivered = second.evaluate(
             """
             async () => Promise.race([
-              window.__taskSpaceStorageProbe,
+              window.__myboxStorageProbe,
               new Promise((resolve) => setTimeout(() => resolve(null), 3_000)),
             ])
             """
         )
-    if delivered != "task-space-browser-smoke":
+    if delivered != "mybox-browser-smoke":
         transport = "BroadcastChannel" if has_broadcast_channel else "storage events"
         raise AssertionError(f"{transport} did not deliver: {delivered!r}")
     if has_broadcast_channel:
         second.evaluate(
             """
             (name) => {
-              window.__taskSpaceChannelMessages = [];
-              window.__taskSpaceChannelCapture = new BroadcastChannel(name);
-              window.__taskSpaceChannelCapture.onmessage = (event) =>
-                window.__taskSpaceChannelMessages.push(event.data);
+              window.__myboxChannelMessages = [];
+              window.__myboxChannelCapture = new BroadcastChannel(name);
+              window.__myboxChannelCapture.onmessage = (event) =>
+                window.__myboxChannelMessages.push(event.data);
             }
             """,
             channel_name,
@@ -618,10 +618,10 @@ def assert_broadcast_channel_delivery(first: Page, second: Page) -> tuple[str | 
         second.evaluate(
             """
             (key) => {
-              window.__taskSpaceStorageMessages = [];
+              window.__myboxStorageMessages = [];
               window.addEventListener("storage", (event) => {
                 if (event.key === key && event.newValue) {
-                  window.__taskSpaceStorageMessages.push(event.newValue);
+                  window.__myboxStorageMessages.push(event.newValue);
                 }
               });
             }
@@ -643,21 +643,21 @@ def assert_expired_session_keeps_account_namespace(
     context.add_init_script(
         """
         try {
-          localStorage.setItem("task_space_authenticated_session", "true");
-          localStorage.setItem("task_space_active_account_id", "expired-regression");
+          localStorage.setItem("mybox_authenticated_session", "true");
+          localStorage.setItem("mybox_active_account_id", "expired-regression");
         } catch (_) {}
         """
     )
     if authenticated:
         seed_authenticated_namespace(
-            context, os.environ.get("TASK_SPACE_AUTHENTICATED_ACCOUNT_ID")
+            context, os.environ.get("MYBOX_AUTHENTICATED_ACCOUNT_ID")
         )
     if "ngrok" in urlsplit(app_url).netloc:
         context.set_extra_http_headers({"ngrok-skip-browser-warning": "1"})
     page = context.new_page()
     try:
         page.goto(app_url, wait_until="domcontentloaded")
-        page.locator("#task-space-board").wait_for(state="visible", timeout=15_000)
+        page.locator("#mybox-board").wait_for(state="visible", timeout=15_000)
         page.get_by_text("session expired", exact=False).first.wait_for(
             state="visible", timeout=25_000
         )
@@ -697,7 +697,7 @@ def run_context(
         """
         try {
           localStorage.setItem(
-            "task-space:auth-refresh-lock",
+            "mybox:auth-refresh-lock",
             JSON.stringify({ owner: "browser-smoke-stale-holder", expiresAt: Date.now() - 1 })
           );
         } catch (_) {}
@@ -717,7 +717,7 @@ def run_context(
         page.on(
             "console",
             lambda message: console_messages.append(f"{message.type}: {message.text}")
-            if "task-space" in message.text.lower()
+            if "mybox" in message.text.lower()
             else None,
         )
         page.on(
@@ -804,17 +804,17 @@ def run_context(
             except TimeoutError:
                 pass
         first_tab_id = first.evaluate(
-            "() => sessionStorage.getItem('task-space.local-tab-id.v1')"
+            "() => sessionStorage.getItem('mybox.local-tab-id.v1')"
         )
         second_tab_id = second.evaluate(
-            "() => sessionStorage.getItem('task-space.local-tab-id.v1')"
+            "() => sessionStorage.getItem('mybox.local-tab-id.v1')"
         )
         raise RuntimeError(
             f"{label} sibling tab did not receive first edit;\n"
             f"first records: {summarize_sync_records(records)!r}\n"
             f"second records: {summarize_sync_records(read_sync_records(second))!r}\n"
             f"workspace: {str(read_workspace_record(first, candidate_principal))[:2_000]}\n"
-            f"transport messages: {second.evaluate('() => window.__taskSpaceChannelMessages || window.__taskSpaceStorageMessages || []')}\n"
+            f"transport messages: {second.evaluate('() => window.__myboxChannelMessages || window.__myboxStorageMessages || []')}\n"
             f"channel: {channel_name or storage_key}\n"
             f"tab ids: {first_tab_id} / {second_tab_id}\n"
             f"console: {console_messages[-30:]}\n"
@@ -928,7 +928,7 @@ def run_browser_once(
     session_cookie: str | None = None,
     viewport: tuple[int, int] | None = None,
 ) -> None:
-    with tempfile.TemporaryDirectory(prefix="task-space-browser-") as user_data_dir:
+    with tempfile.TemporaryDirectory(prefix="mybox-browser-") as user_data_dir:
         port = find_free_port()
         log_path = Path(user_data_dir) / "browser.log"
         with log_path.open("wb") as log_file:
@@ -1002,7 +1002,7 @@ def run_isolated_profile_pair(
     """Exercise two independent browser profiles through the real sync API."""
     if len(executables) != 2:
         raise ValueError("isolated profile pair requires exactly two executables")
-    with tempfile.TemporaryDirectory(prefix="task-space-browser-pair-") as root:
+    with tempfile.TemporaryDirectory(prefix="mybox-browser-pair-") as root:
         root_path = Path(root)
         processes: list[subprocess.Popen[bytes]] = []
         browsers: list[Any] = []
@@ -1060,14 +1060,14 @@ def run_isolated_profile_pair(
                     """
                     try {
                       localStorage.setItem(
-                        "task-space:auth-refresh-lock",
+                        "mybox:auth-refresh-lock",
                         JSON.stringify({ owner: "browser-smoke-stale-holder", expiresAt: Date.now() - 1 })
                       );
                     } catch (_) {}
                     """
                 )
                 seed_authenticated_namespace(
-                    context, os.environ.get("TASK_SPACE_AUTHENTICATED_ACCOUNT_ID")
+                    context, os.environ.get("MYBOX_AUTHENTICATED_ACCOUNT_ID")
                 )
                 seed_session_cookie(context, app_url, session_cookie)
                 page = context.new_page()
@@ -1180,8 +1180,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--url",
-        default=os.environ.get("TASK_SPACE_BROWSER_URL", "http://127.0.0.1:8081/app"),
-        help="frontend app URL, including /app (or TASK_SPACE_BROWSER_URL)",
+        default=os.environ.get("MYBOX_BROWSER_URL", "http://127.0.0.1:8081/"),
+        help="frontend app URL (or MYBOX_BROWSER_URL)",
     )
     parser.add_argument(
         "--browser-executable",
@@ -1196,8 +1196,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--session-cookie",
-        default=os.environ.get("TASK_SPACE_SESSION_COOKIE"),
-        help="real task_space_session cookie for the authenticated acceptance path",
+        default=os.environ.get("MYBOX_SESSION_COOKIE"),
+        help="real mybox_session cookie for the authenticated acceptance path",
     )
     parser.add_argument(
         "--isolated-profiles",
@@ -1233,12 +1233,12 @@ def main() -> None:
                 raise RuntimeError("--cross-browser currently supports Chromium engines only")
             chrome_candidates = [
                 args.browser_executable,
-                os.environ.get("TASK_SPACE_BROWSER_EXECUTABLE"),
+                os.environ.get("MYBOX_BROWSER_EXECUTABLE"),
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                 playwright.chromium.executable_path,
             ]
             helium_candidates = [
-                os.environ.get("TASK_SPACE_HELIUM_EXECUTABLE"),
+                os.environ.get("MYBOX_HELIUM_EXECUTABLE"),
                 "/Applications/Helium.app/Contents/MacOS/Helium",
             ]
             chrome_executable = next(
@@ -1269,7 +1269,7 @@ def main() -> None:
                 raise RuntimeError("--isolated-profiles currently supports Chromium engines only")
             candidates = [
                 args.browser_executable,
-                os.environ.get("TASK_SPACE_BROWSER_EXECUTABLE"),
+                os.environ.get("MYBOX_BROWSER_EXECUTABLE"),
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                 "/Applications/Helium.app/Contents/MacOS/Helium",
                 playwright.chromium.executable_path,
@@ -1313,7 +1313,7 @@ def main() -> None:
             return
         candidates = [
             args.browser_executable,
-            os.environ.get("TASK_SPACE_BROWSER_EXECUTABLE"),
+            os.environ.get("MYBOX_BROWSER_EXECUTABLE"),
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "/Applications/Helium.app/Contents/MacOS/Helium",
             playwright.chromium.executable_path,

@@ -4,15 +4,15 @@ set -euo pipefail
 # This is intentionally opt-in because it restarts the local acceptance
 # containers. It does not target a production host unless the caller points
 # the variables at one explicitly.
-if [[ "${TASK_SPACE_CHAOS_CONFIRM:-}" != "I_UNDERSTAND_LOCAL_RESTART_TEST" ]]; then
-  printf '%s\n' 'Refusing to restart containers without TASK_SPACE_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_RESTART_TEST.' >&2
+if [[ "${MYBOX_CHAOS_CONFIRM:-}" != "I_UNDERSTAND_LOCAL_RESTART_TEST" ]]; then
+  printf '%s\n' 'Refusing to restart containers without MYBOX_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_RESTART_TEST.' >&2
   exit 2
 fi
 
-api_container="${TASK_SPACE_API_CONTAINER:-task-space-chaos-acceptance}"
-database_container="${TASK_SPACE_DATABASE_CONTAINER:-deploy-postgres-1}"
-api_url="${TASK_SPACE_API_URL:-http://127.0.0.1:3300}"
-deadline_seconds="${TASK_SPACE_CHAOS_TIMEOUT_SECONDS:-45}"
+api_container="${MYBOX_API_CONTAINER:-mybox-chaos-acceptance}"
+database_container="${MYBOX_DATABASE_CONTAINER:-deploy-postgres-1}"
+api_url="${MYBOX_API_URL:-http://127.0.0.1:3300}"
+deadline_seconds="${MYBOX_CHAOS_TIMEOUT_SECONDS:-45}"
 
 request_status() {
   local url="$1"

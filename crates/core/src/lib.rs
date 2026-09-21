@@ -1,4 +1,4 @@
-//! Shared Task Space document schema.
+//! Shared MyBox document schema.
 //!
 //! The browser uses this model for both the free device-local board and the
 //! authenticated account-backed CRUD API, keeping wire and UI data aligned.
@@ -21,7 +21,7 @@ pub type EntityId = u64;
 pub fn legacy_entity_stable_id(kind: &str, id: EntityId) -> String {
     uuid::Uuid::new_v5(
         &uuid::Uuid::NAMESPACE_URL,
-        format!("https://task-space.invalid/entity/{kind}/{id}").as_bytes(),
+        format!("https://mybox.invalid/entity/{kind}/{id}").as_bytes(),
     )
     .to_string()
 }

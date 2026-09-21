@@ -1,12 +1,12 @@
 [package]
-name = "task-web"
+name = "mybox-web"
 version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-task-core = { path = "../../crates/core" }
+mybox-core = { path = "../../crates/core" }
 leptos = { version = "0.8.20", features = ["csr"] }
 console_error_panic_hook = "0.1"
 gloo-net = { version = "0.6", features = ["http", "json"] }

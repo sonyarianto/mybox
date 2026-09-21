@@ -1479,6 +1479,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "mybox-core"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "uuid",
+ "yrs",
+]
+
+[[package]]
+name = "mybox-server"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "async-trait",
+ "axum",
+ "base64",
+ "futures-util",
+ "mybox-core",
+ "rand 0.8.8",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tower-http",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "mybox-web"
+version = "0.1.1"
+dependencies = [
+ "console_error_panic_hook",
+ "gloo-net",
+ "js-sys",
+ "leptos",
+ "leptos_router",
+ "mybox-core",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "next_tuple"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2742,59 +2795,6 @@ dependencies = [
  "slotmap",
  "throw_error",
  "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "task-core"
-version = "0.1.0"
-dependencies = [
- "base64",
- "serde",
- "serde_json",
- "uuid",
- "yrs",
-]
-
-[[package]]
-name = "task-server"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "async-trait",
- "axum",
- "base64",
- "futures-util",
- "rand 0.8.8",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "task-core",
- "thiserror 2.0.20",
- "tokio",
- "tokio-stream",
- "tower",
- "tower-http",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "task-web"
-version = "0.1.1"
-dependencies = [
- "console_error_panic_hook",
- "gloo-net",
- "js-sys",
- "leptos",
- "leptos_router",
- "serde",
- "serde_json",
- "task-core",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
 ]
 

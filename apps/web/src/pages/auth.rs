@@ -11,7 +11,7 @@ use super::account::{
 use super::api::{api_url, send_request_with_timeout};
 
 #[allow(dead_code)]
-const PENDING_AUTH_STORAGE_KEY: &str = "task_space_pending_auth";
+const PENDING_AUTH_STORAGE_KEY: &str = "mybox_pending_auth";
 
 #[derive(Clone, Debug, Default, Deserialize)]
 struct AuthApiResponse {
@@ -78,7 +78,7 @@ fn redirect(path: &str) {
 fn redirect_if_authenticated() {
     spawn_local(async {
         if load_account_state().await.is_authenticated() {
-            redirect("/app");
+            redirect("/");
         }
     });
 }
@@ -119,7 +119,7 @@ fn AuthFrame(title: &'static str, body: &'static str, children: Children) -> imp
             <div class="w-full max-w-sm">
                 <a href="/" class="mb-6 flex items-center gap-2 font-handwriting text-4xl">
                     <span class="grid h-8 w-8 place-items-center bg-ink font-sans text-lg text-paper">"S"</span>
-                    <span>"Task Space"</span>
+                    <span>"MyBox"</span>
                 </a>
                 <div class="rounded-md border border-ink-soft/10 bg-paper-shelf/60 p-6 shadow-sm">
                     <h1 class="font-handwriting text-4xl">{title}</h1>
@@ -127,7 +127,7 @@ fn AuthFrame(title: &'static str, body: &'static str, children: Children) -> imp
                     {children()}
                 </div>
                 <a href="/" class="mt-6 block text-center text-sm text-ink-soft underline">
-                    "back to the landing page"
+                    "back home"
                 </a>
             </div>
         </main>
@@ -210,7 +210,7 @@ pub fn SignIn() -> impl IntoView {
                     } else {
                         remember_authenticated_session();
                     }
-                    redirect("/app")
+                    redirect("/")
                 }
                 Ok(response) => error.set(response.message),
                 Err(message) => error.set(Some(message)),
@@ -301,7 +301,7 @@ pub fn SignUp() -> impl IntoView {
                     } else {
                         remember_authenticated_session();
                     }
-                    redirect("/app")
+                    redirect("/")
                 }
                 Ok(response) => error.set(response.message),
                 Err(message) => error.set(Some(message)),
@@ -474,7 +474,7 @@ pub fn ResetPassword() -> impl IntoView {
     view! {
         <AuthFrame
             title="a fresh pin"
-            body="Choose a new password for your Task Space account."
+            body="Choose a new password for your MyBox account."
         >
             <form class="mt-5 space-y-4" on:submit=submit>
                 <label class="block text-sm text-ink-soft">
@@ -539,7 +539,7 @@ pub fn VerifyEmail() -> impl IntoView {
                     } else {
                         remember_authenticated_session();
                     }
-                    redirect("/app")
+                    redirect("/")
                 }
                 Err(value) => {
                     error.set(Some(value));

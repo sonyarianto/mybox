@@ -1,6 +1,6 @@
-# Task Space
+# MyBox
 
-Task Space is a paper-and-sticky-notes task manager built around an infinite
+MyBox is a paper-and-sticky-notes task manager built around an infinite
 canvas. It is local-first by default: the free board works offline, needs no
 account, and stores work in the browser. Pro is optional and adds account-based
 cloud sync across devices.
@@ -44,11 +44,11 @@ values:
 cp .env.example .env
 ```
 
-At minimum, configure the database values, `TASK_SPACE_ALLOWED_ORIGINS`, and
+At minimum, configure the database values, `MYBOX_ALLOWED_ORIGINS`, and
 `AUTH_POST_LOGIN_REDIRECT`.
 
 Use the public HTTPS origin consistently in `AUTH_POST_LOGIN_REDIRECT` and
-`TASK_SPACE_ALLOWED_ORIGINS`. To offer Google/GitHub sign-in, register
+`MYBOX_ALLOWED_ORIGINS`. To offer Google/GitHub sign-in, register
 `OAUTH_GOOGLE_REDIRECT_URI` / `OAUTH_GITHUB_REDIRECT_URI`
 (`https://your-domain.example/auth/callback`) with each provider and set the
 matching client IDs and secrets.
@@ -63,7 +63,7 @@ make css
 cd apps/web && trunk build --release
 cd ../..
 docker compose --env-file .env -f deploy/docker-compose.yml up --build -d \
-  postgres task-space-api task-space caddy
+  postgres mybox-api mybox caddy
 ```
 
 Update `deploy/caddy/Caddyfile` with your domain before starting Caddy. It
@@ -88,7 +88,7 @@ and create regular encrypted PostgreSQL backups. The repository includes
 For a local UI and API run:
 
 ```sh
-docker compose -f deploy/docker-compose.yml up --build postgres task-space-api
+docker compose -f deploy/docker-compose.yml up --build postgres mybox-api
 make dev
 ```
 

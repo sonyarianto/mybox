@@ -6,7 +6,6 @@ use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
 use pages::auth::{ForgotPassword, ResetPassword, SignIn, SignUp, VerifyEmail};
 use pages::board::Board;
-use pages::home::Home;
 
 // Bump this marker when a static runtime/proxy fix needs to invalidate an
 // otherwise immutable browser asset without changing the visible UI.
@@ -29,8 +28,7 @@ pub fn App() -> impl IntoView {
                         </main>
                     }
                 }>
-                    <Route path=path!("/") view=Home/>
-                    <Route path=path!("/app") view=Board/>
+                    <Route path=path!("/") view=Board/>
                     <Route path=path!("/signin") view=SignIn/>
                     <Route path=path!("/signup") view=SignUp/>
                     <Route path=path!("/forgot-password") view=ForgotPassword/>
