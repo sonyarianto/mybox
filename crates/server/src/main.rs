@@ -1,39 +1,21 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::http::header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, RETRY_AFTER};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::middleware;
 use sqlx::PgPool;
-use task_server::dodo::{DodoClient, DodoClientConfig, DodoWebhook, DodoWebhookConfig};
+use task_server::auth::{LocalAuth, LocalAuthConfig};
 use task_server::http::{
     RequestRateLimiter, SyncHttpState, add_request_id, health_router, metrics_router,
     protected_api_router,
 };
 use task_server::metrics::Metrics;
-use task_server::postgres::{PostgresBillingStore, PostgresSyncStore};
-use task_server::workos::{self, WorkOsAuth, WorkOsAuthConfig};
+use task_server::postgres::PostgresSyncStore;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use url::Url;
 
 #[tokio::main]
 async fn main() {
-    let workos = Arc::new(
-        WorkOsAuth::new(
-            WorkOsAuthConfig::from_env().expect("WorkOS environment is not configured"),
-        )
-        .expect("WorkOS configuration is invalid"),
-    );
-    let dodo = Arc::new(
-        DodoWebhook::new(
-            DodoWebhookConfig::from_env().expect("Dodo environment is not configured"),
-        )
-        .expect("Dodo webhook configuration is invalid"),
-    );
-    let dodo_client = DodoClient::new(
-        DodoClientConfig::from_env().expect("Dodo API configuration is not configured"),
-    )
-    .expect("Dodo API configuration is invalid");
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL is not configured");
     let pool = PgPool::connect(&database_url)
         .await
@@ -43,97 +25,16 @@ async fn main() {
         .migrate()
         .await
         .expect("database migrations should run");
-    workos
-        .check_readiness()
+    let auth_config =
+        LocalAuthConfig::from_env().expect("auth environment is not configured");
+    let auth = Arc::new(LocalAuth::new(pool.clone(), auth_config));
+    auth.check_readiness()
         .await
-        .expect("WorkOS JWKS readiness check should pass");
-    let retention_seconds = std::env::var("BILLING_RETENTION_SECONDS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(90 * 24 * 60 * 60);
+        .expect("auth database readiness check should pass");
     let metrics = Metrics::default();
-    let billing = PostgresBillingStore::new(pool);
-    let billing_history_store = billing.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(60 * 60));
-        loop {
-            interval.tick().await;
-            if let Err(error) = billing_history_store
-                .recover_stale_webhook_attempts(15 * 60)
-                .await
-            {
-                eprintln!("stale billing webhook recovery failed: {error}");
-            }
-            if let Err(error) = billing_history_store
-                .prune_billing_history(retention_seconds)
-                .await
-            {
-                eprintln!("billing history retention failed: {error}");
-            }
-        }
-    });
-    let reconciliation_billing = billing.clone();
-    let reconciliation_client = dodo_client.clone();
-    let reconciliation_webhook = dodo.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(15 * 60));
-        loop {
-            interval.tick().await;
-            let candidates = match reconciliation_billing
-                .reconciliation_candidates(50, 60 * 60)
-                .await
-            {
-                Ok(candidates) => candidates,
-                Err(error) => {
-                    eprintln!("billing reconciliation query failed: {error}");
-                    continue;
-                }
-            };
-            for (account_id, subscription_id) in candidates {
-                let result: Result<(), String> = async {
-                    let snapshot = reconciliation_client
-                        .fetch_subscription(&subscription_id)
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    let event = reconciliation_webhook
-                        .normalize_subscription_snapshot(&account_id, &snapshot)
-                        .map_err(|error| error.to_string())?;
-                    reconciliation_billing
-                        .apply_event(&event)
-                        .await
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
-                }
-                .await;
-                match result {
-                    Ok(_) => {
-                        if let Err(error) = reconciliation_billing
-                            .mark_reconciliation(&account_id, None)
-                            .await
-                        {
-                            eprintln!("billing reconciliation checkpoint failed: {error}");
-                        }
-                    }
-                    Err(error) => {
-                        eprintln!("billing reconciliation failed for {account_id}: {error}");
-                        let _ = reconciliation_billing
-                            .mark_reconciliation(&account_id, Some(&error.to_string()))
-                            .await;
-                    }
-                }
-            }
-        }
-    });
     let configured_origins = allowed_origins();
     if std::env::var("TASK_SPACE_ALLOWED_ORIGINS").is_ok() && configured_origins.is_empty() {
         panic!("TASK_SPACE_ALLOWED_ORIGINS did not contain a valid HTTP(S) origin");
-    }
-    if std::env::var("DODO_PAYMENTS_ENVIRONMENT").as_deref() == Ok("live_mode")
-        && configured_origins
-            .iter()
-            .any(|origin| !origin.starts_with("https://"))
-    {
-        panic!("live mode requires HTTPS TASK_SPACE_ALLOWED_ORIGINS");
     }
     let local_cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate({
@@ -166,12 +67,7 @@ async fn main() {
             RETRY_AFTER,
         ])
         .allow_credentials(true);
-    let app = workos::router(workos.clone())
-        .merge(task_server::dodo::router(
-            dodo,
-            billing.clone(),
-            metrics.clone(),
-        ))
+    let app = task_server::auth::router(auth.clone())
         .merge(health_router(store.pool().clone(), metrics.clone()))
         .merge(metrics_router(
             metrics.clone(),
@@ -179,10 +75,8 @@ async fn main() {
         ))
         .merge(protected_api_router(SyncHttpState {
             store,
-            billing,
-            payments: dodo_client,
-            verifier: workos.clone(),
-            session_cookie_name: workos.cookie_name().to_owned(),
+            verifier: auth.clone(),
+            session_cookie_name: auth.cookie_name().to_owned(),
             allowed_origins: Arc::new(configured_origins),
             rate_limiter: RequestRateLimiter::default(),
             metrics,
@@ -215,13 +109,11 @@ fn allowed_origins() -> Vec<String> {
         "http://[::1]:8080".to_owned(),
         "http://[::1]:3000".to_owned(),
     ];
-    // A stable HTTPS test origin is already required for the auth callback
-    // and payment return URL. When the explicit allowlist is omitted, derive
-    // the browser origin from those server-owned URLs so cookie-authenticated
-    // POSTs from an ngrok/staging host are not silently rejected as CSRF. An
-    // explicit TASK_SPACE_ALLOWED_ORIGINS value remains authoritative in
-    // production and can be used to narrow this set to one exact origin.
+    // Derive the browser origin from server-owned redirect URLs when the
+    // explicit allowlist is omitted. Prefer the new AUTH_* variable but keep
+    // the legacy WorkOS/Dodo names as fallback during the cutover.
     for variable in [
+        "AUTH_POST_LOGIN_REDIRECT",
         "WORKOS_POST_LOGIN_REDIRECT_URI",
         "DODO_PAYMENTS_RETURN_URL",
         "WORKOS_REDIRECT_URI",

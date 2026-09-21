@@ -19,7 +19,6 @@ use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use task_core::billing::SyncAccessMode;
 use task_core::sync::{
     SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_PROTOCOL_VERSION, SyncMetadataRequest, SyncMetadataResponse,
     SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncReconcileRequest,
@@ -30,10 +29,9 @@ use tokio_stream::StreamExt;
 use url::Url;
 use uuid::Uuid;
 
-use crate::dodo::{BillingInterval, DodoClient, DodoError};
 use crate::metrics::Metrics;
 use crate::postgres::{
-    CrudSpaceRecord, PostgresBillingStore, PostgresStoreError, PostgresSyncStore,
+    CrudSpaceRecord, PostgresStoreError, PostgresSyncStore,
 };
 
 // EncodedUpdate values are URL-safe base64 in JSON, so the HTTP envelope is
@@ -89,8 +87,9 @@ impl IntoResponse for AuthError {
     }
 }
 
-/// Provider-neutral session verification contract. A WorkOS/JWT implementation
-/// can be supplied later without changing the sync handlers.
+/// Session verification contract. Any verifier (local opaque sessions in
+/// production, deterministic test verifiers in acceptance) can be supplied
+/// without changing the sync handlers.
 #[async_trait]
 pub trait SessionVerifier: Send + Sync {
     async fn verify(&self, bearer_token: &str) -> Result<AuthenticatedAccount, AuthError>;
@@ -129,8 +128,6 @@ pub async fn add_request_id(mut request: Request<Body>, next: Next) -> Response 
 #[derive(Clone)]
 pub struct SyncHttpState {
     pub store: PostgresSyncStore,
-    pub billing: PostgresBillingStore,
-    pub payments: DodoClient,
     pub verifier: Arc<dyn SessionVerifier>,
     pub session_cookie_name: String,
     /// Exact browser origins allowed to send cookie-authenticated mutations.
@@ -248,8 +245,6 @@ pub fn protected_sync_router(state: SyncHttpState) -> Router {
         .route("/auth/session", get(auth_session))
         .route("/auth/diagnostics", get(auth_diagnostics))
         .route("/account/entitlement", get(account_entitlement))
-        .route("/billing/checkout", post(create_checkout))
-        .route("/billing/portal", post(create_billing_portal))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_session,
@@ -279,8 +274,6 @@ pub fn protected_api_router(state: SyncHttpState) -> Router {
         .route("/auth/session", get(auth_session))
         .route("/auth/diagnostics", get(auth_diagnostics))
         .route("/account/entitlement", get(account_entitlement))
-        .route("/billing/checkout", post(create_checkout))
-        .route("/billing/portal", post(create_billing_portal))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_session,
@@ -332,7 +325,6 @@ async fn crud_list_spaces(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     state
         .store
         .crud_list_spaces(&account.account_id)
@@ -357,10 +349,9 @@ async fn crud_create_space(
     ) {
         return Err(ApiError::RateLimited);
     }
-    let entitlement = require_sync_entitlement(&state.billing, &account.account_id).await?;
     let space = state
         .store
-        .crud_create_space(&account.account_id, &request.name, entitlement.max_spaces)
+        .crud_create_space(&account.account_id, &request.name, MAX_SPACES_PER_ACCOUNT)
         .await
         .map_err(ApiError::from)?;
     Ok((StatusCode::CREATED, Json(space)))
@@ -383,7 +374,6 @@ async fn crud_update_space(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     state
         .store
         .crud_update_space(
@@ -414,7 +404,6 @@ async fn crud_delete_space(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     state
         .store
         .crud_update_space(&account.account_id, space_id, None, Some(true), Some(true))
@@ -439,7 +428,6 @@ async fn crud_get_board(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     let (version, board) = state
         .store
         .crud_get_board(&account.account_id, space_id)
@@ -469,7 +457,6 @@ async fn crud_put_board(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     let version = state
         .store
         .crud_put_board(&account.account_id, space_id, &request.board)
@@ -618,8 +605,6 @@ fn metric_route(path: &str) -> &'static str {
         "/auth/session" => "auth_session",
         "/auth/diagnostics" => "auth_diagnostics",
         "/account/entitlement" => "account_entitlement",
-        "/billing/checkout" => "billing_checkout",
-        "/billing/portal" => "billing_portal",
         "/api/spaces" => "crud_spaces",
         _ if path.starts_with("/api/spaces/") && path.ends_with("/board") => "crud_board",
         _ if path.starts_with("/api/spaces/") => "crud_space",
@@ -637,15 +622,12 @@ fn response_error_metric_kind(response: &Response) -> Option<&'static str> {
         "SESSION_REQUIRED" => "auth_missing",
         "SESSION_EXPIRED" => "auth_expired",
         "CSRF_REJECTED" => "csrf_rejected",
-        "SYNC_NOT_ENTITLED" => "entitlement_denied",
-        "SYNC_PAYMENT_PAUSED" => "entitlement_payment_paused",
         "MUTATION_ID_REUSED" => "mutation_conflict",
         "METADATA_VERSION_CONFLICT" => "metadata_conflict",
         "METADATA_CONFLICT_SUPERSEDED" => "metadata_conflict_superseded",
         "SYNC_CURSOR_RESET_REQUIRED" => "cursor_reset",
         "DATABASE_UNAVAILABLE" => "database",
         "RATE_LIMITED" => "rate_limited",
-        "PAYMENT_PROVIDER_ERROR" => "payment_provider",
         _ => "other_api_error",
     })
 }
@@ -830,7 +812,6 @@ async fn sync_pull(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     state
         .store
         .pull(&account.account_id, &request)
@@ -865,9 +846,7 @@ struct AuthDiagnosticsResponse {
     authenticated: bool,
     account_id: String,
     session_present: bool,
-    entitlement_version: u64,
     sync_enabled: bool,
-    access_mode: SyncAccessMode,
     server_time: u64,
 }
 
@@ -886,11 +865,6 @@ async fn auth_diagnostics(
     ) {
         return Err(ApiError::RateLimited);
     }
-    let entitlement = state
-        .billing
-        .entitlement(&account.account_id)
-        .await
-        .map_err(ApiError::from)?;
     let server_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -899,9 +873,7 @@ async fn auth_diagnostics(
         authenticated: true,
         account_id: account.account_id,
         session_present: !account.session_id.trim().is_empty(),
-        entitlement_version: entitlement.version,
-        sync_enabled: entitlement.sync_enabled,
-        access_mode: entitlement.access_mode,
+        sync_enabled: true,
         server_time,
     })
     .into_response();
@@ -928,7 +900,6 @@ async fn sync_push(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     let event = state
         .store
         .push(&account.account_id, &request)
@@ -975,7 +946,6 @@ async fn sync_reconcile(
             .metrics
             .add("task_space_sync_update_bytes_total", update.len() as u64);
     }
-    let entitlement = require_sync_entitlement(&state.billing, &account.account_id).await?;
     let mut response = match state.store.reconcile(&account.account_id, &request).await {
         Ok(response) => {
             state.metrics.inc("task_space_sync_reconcile_success_total");
@@ -1017,7 +987,7 @@ async fn sync_reconcile(
             return Err(ApiError::from(error));
         }
     };
-    response.entitlement_version = entitlement.version;
+    response.entitlement_version = 0;
     Ok(Json(response))
 }
 
@@ -1052,7 +1022,6 @@ async fn sync_events(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     state.metrics.inc("task_space_sync_sse_connections_total");
     let after_event_id = headers
         .get(axum::http::HeaderName::from_static("last-event-id"))
@@ -1170,7 +1139,6 @@ async fn list_spaces(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     let spaces = state
         .store
         .list_spaces(&account.account_id)
@@ -1208,7 +1176,6 @@ async fn register_space(
     ) {
         return Err(ApiError::RateLimited);
     }
-    let entitlement = require_sync_entitlement(&state.billing, &account.account_id).await?;
     if request.name.trim().is_empty() || request.name.trim().len() > 48 {
         return Err(ApiError::Store(PostgresStoreError::InvalidInput(
             "space name must be between 1 and 48 characters".to_owned(),
@@ -1221,7 +1188,7 @@ async fn register_space(
             space_id,
             request.stable_id.as_deref(),
             request.name.trim(),
-            entitlement.max_spaces,
+            MAX_SPACES_PER_ACCOUNT,
         )
         .await
         .map_err(ApiError::from)?;
@@ -1245,7 +1212,6 @@ async fn update_space_metadata(
     ) {
         return Err(ApiError::RateLimited);
     }
-    require_sync_entitlement(&state.billing, &account.account_id).await?;
     // The path is authoritative; a body cannot redirect a metadata mutation
     // to another account or resource.
     request.space_id = _space_id;
@@ -1257,26 +1223,7 @@ async fn update_space_metadata(
         .map_err(ApiError::from)
 }
 
-async fn require_sync_entitlement(
-    billing: &PostgresBillingStore,
-    account_id: &str,
-) -> Result<task_core::billing::Entitlement, ApiError> {
-    let entitlement = billing
-        .entitlement(account_id)
-        .await
-        .map_err(ApiError::from)?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    if entitlement.can_sync_at(now) {
-        Ok(entitlement)
-    } else if matches!(entitlement.access_mode, SyncAccessMode::GraceReadWrite) {
-        Err(ApiError::Store(PostgresStoreError::SyncPaymentPaused))
-    } else {
-        Err(ApiError::Store(PostgresStoreError::SyncNotEntitled))
-    }
-}
+const MAX_SPACES_PER_ACCOUNT: u32 = 100;
 
 async fn account_entitlement(
     State(state): State<SyncHttpState>,
@@ -1293,12 +1240,18 @@ async fn account_entitlement(
     ) {
         return Err(ApiError::RateLimited);
     }
-    let entitlement = state
-        .billing
-        .entitlement(&account.account_id)
-        .await
-        .map_err(ApiError::from)?;
-    let mut response = Json(entitlement).into_response();
+    // Billing is dropped: every authenticated account syncs. Keep the endpoint
+    // so older browsers keep working; they only need sync_enabled + limits.
+    let mut response = Json(serde_json::json!({
+        "account_id": account.account_id,
+        "plan": "pro",
+        "status": "active",
+        "sync_enabled": true,
+        "max_spaces": MAX_SPACES_PER_ACCOUNT,
+        "access_mode": "read_write",
+        "version": 0,
+    }))
+    .into_response();
     response.headers_mut().insert(
         CACHE_CONTROL,
         axum::http::HeaderValue::from_static("no-store"),
@@ -1306,115 +1259,15 @@ async fn account_entitlement(
     Ok(response)
 }
 
-#[derive(Debug, Deserialize)]
-struct CheckoutRequest {
-    interval: BillingInterval,
-}
-
-#[derive(Debug, Serialize)]
-struct CheckoutResponse {
-    checkout_url: String,
-}
-
-#[derive(Debug, Serialize)]
-struct BillingPortalResponse {
-    portal_url: String,
-}
-
-async fn create_checkout(
-    State(state): State<SyncHttpState>,
-    Extension(account): Extension<AuthenticatedAccount>,
-    headers: HeaderMap,
-    Json(request): Json<CheckoutRequest>,
-) -> Result<Json<CheckoutResponse>, ApiError> {
-    if !state.rate_limiter.allow_account_and_ip(
-        &headers,
-        "checkout",
-        &account.account_id,
-        10,
-        100,
-        Duration::from_secs(60),
-    ) {
-        return Err(ApiError::RateLimited);
-    }
-    let interval_name = match request.interval {
-        BillingInterval::Month => "month",
-        BillingInterval::Year => "year",
-    };
-    let (idempotency_key, existing_url) = state
-        .billing
-        .reserve_checkout(&account.account_id, interval_name)
-        .await
-        .map_err(ApiError::from)?;
-    if let Some(checkout_url) = existing_url {
-        return Ok(Json(CheckoutResponse { checkout_url }));
-    }
-    let checkout_url = state
-        .payments
-        .create_checkout(&account.account_id, request.interval, &idempotency_key)
-        .await
-        .map_err(|error| {
-            eprintln!("Dodo checkout failed for an authenticated account: {error}");
-            ApiError::from(error)
-        })?;
-    state
-        .billing
-        .complete_checkout(&idempotency_key, &checkout_url)
-        .await
-        .map_err(ApiError::from)?;
-    Ok(Json(CheckoutResponse { checkout_url }))
-}
-
-async fn create_billing_portal(
-    State(state): State<SyncHttpState>,
-    Extension(account): Extension<AuthenticatedAccount>,
-    headers: HeaderMap,
-) -> Result<Json<BillingPortalResponse>, ApiError> {
-    if !state.rate_limiter.allow_account_and_ip(
-        &headers,
-        "billing-portal",
-        &account.account_id,
-        10,
-        100,
-        Duration::from_secs(60),
-    ) {
-        return Err(ApiError::RateLimited);
-    }
-    let entitlement = state
-        .billing
-        .entitlement(&account.account_id)
-        .await
-        .map_err(ApiError::from)?;
-    let customer_id = entitlement
-        .provider_customer_id
-        .as_deref()
-        .filter(|_| entitlement.provider.as_deref() == Some("dodo"))
-        .ok_or(ApiError::BillingPortalUnavailable)?;
-    let portal_url = state
-        .payments
-        .create_customer_portal(customer_id)
-        .await
-        .map_err(ApiError::from)?;
-    Ok(Json(BillingPortalResponse { portal_url }))
-}
-
 #[derive(Debug)]
 enum ApiError {
     Store(PostgresStoreError),
-    Dodo(DodoError),
-    BillingPortalUnavailable,
     RateLimited,
 }
 
 impl From<PostgresStoreError> for ApiError {
     fn from(error: PostgresStoreError) -> Self {
         Self::Store(error)
-    }
-}
-
-impl From<DodoError> for ApiError {
-    fn from(error: DodoError) -> Self {
-        Self::Dodo(error)
     }
 }
 
@@ -1449,8 +1302,6 @@ impl IntoResponse for ApiError {
                 "CLIENT_UPGRADE_REQUIRED"
             }
             Self::Store(PostgresStoreError::Database(_)) => "DATABASE_UNAVAILABLE",
-            Self::Dodo(_) => "PAYMENT_PROVIDER_ERROR",
-            Self::BillingPortalUnavailable => "BILLING_PORTAL_UNAVAILABLE",
             Self::RateLimited => "RATE_LIMITED",
             _ => "API_ERROR",
         };
@@ -1510,19 +1361,6 @@ impl IntoResponse for ApiError {
                 "request input is invalid".to_owned(),
             ),
             Self::Store(error) => (axum::http::StatusCode::BAD_REQUEST, error.to_string()),
-            Self::Dodo(DodoError::Api { status, .. }) => (
-                axum::http::StatusCode::BAD_GATEWAY,
-                format!("payment provider rejected checkout (HTTP {status})"),
-            ),
-            Self::Dodo(DodoError::Request(_)) => (
-                axum::http::StatusCode::BAD_GATEWAY,
-                "payment provider unavailable; please try again".to_owned(),
-            ),
-            Self::Dodo(error) => (axum::http::StatusCode::BAD_REQUEST, error.to_string()),
-            Self::BillingPortalUnavailable => (
-                axum::http::StatusCode::BAD_REQUEST,
-                "billing portal is unavailable for this account".to_owned(),
-            ),
             Self::RateLimited => (
                 axum::http::StatusCode::TOO_MANY_REQUESTS,
                 "too many requests; please retry shortly".to_owned(),

@@ -1,4 +1,4 @@
-.PHONY: dev css fonts check cloudflare-tunnel browser-sync browser-webkit browser-mobile browser-cross browser-authenticated provider-acceptance workos-authenticated postgres-acceptance migration-acceptance capacity-acceptance restart-chaos process-kill-chaos backup-restore-acceptance alert-delivery observability-check rollout-preflight
+.PHONY: dev css fonts check cloudflare-tunnel browser-sync browser-webkit browser-mobile browser-cross browser-authenticated local-auth postgres-acceptance migration-acceptance capacity-acceptance restart-chaos process-kill-chaos backup-restore-acceptance alert-delivery observability-check rollout-preflight
 
 dev: css ## serve the web app (trunk) with hot reload; tailwind watches in background
 	cd apps/web && (npx @tailwindcss/cli -i src/input.css -o src/main.css --watch --poll=500 &) && env -u TRUNK_NO_COLOR -u NO_COLOR trunk serve
@@ -30,11 +30,8 @@ browser-cross: ## exercise authenticated Chrome and Helium convergence
 browser-authenticated: ## exercise authenticated isolated profiles, WebKit, and mobile
 	./scripts/browser-authenticated-acceptance.sh
 
-provider-acceptance: ## exercise the configured Dodo test product, checkout, and signed webhook replay
-	./scripts/provider-acceptance.sh
-
-workos-authenticated: ## exercise the real WorkOS session and protected browser convergence
-	./scripts/workos-authenticated-acceptance.sh
+local-auth: ## exercise local signup, sign-in, session, and OAuth provider discovery
+	./scripts/local-auth-acceptance.sh
 
 postgres-acceptance: ## run database-backed sync acceptance tests inside the Compose network
 	./scripts/run-postgres-acceptance.sh

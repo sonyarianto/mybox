@@ -2,14 +2,42 @@ use std::cell::RefCell;
 
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
-use task_core::billing::Entitlement;
-use wasm_bindgen::closure::Closure;
+
+/// Local entitlement: billing is dropped, every signed-in account syncs.
+/// Extra server fields are ignored so older/newer payloads keep decoding.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct Entitlement {
+    #[serde(default)]
+    pub account_id: String,
+    #[serde(default)]
+    pub plan: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub sync_enabled: bool,
+    #[serde(default)]
+    pub max_spaces: u32,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub provider_customer_id: Option<String>,
+}
+
+impl Entitlement {
+    pub fn can_sync(&self) -> bool {
+        self.sync_enabled
+    }
+    pub fn can_sync_at(&self, _now_secs: u64) -> bool {
+        self.sync_enabled
+    }
+}
+
 use wasm_bindgen::prelude::wasm_bindgen;
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::{JsFuture, future_to_promise};
 use web_sys::{RequestCredentials, Storage};
 
-use super::api::{api_url, send_request_with_timeout, send_with_timeout};
+use super::api::{api_url, send_with_timeout};
 
 const AUTHENTICATED_SESSION_STORAGE_KEY: &str = "task_space_authenticated_session";
 const ACTIVE_ACCOUNT_ID_STORAGE_KEY: &str = "task_space_active_account_id";
@@ -173,6 +201,7 @@ impl AccountState {
         matches!(self, Self::SignedIn(_))
     }
 
+    #[allow(dead_code)]
     pub fn entitlement(&self) -> Option<&Entitlement> {
         match self {
             Self::SignedIn(entitlement) => Some(entitlement),
@@ -356,89 +385,12 @@ async fn auth_session() -> Result<gloo_net::http::Response, gloo_net::Error> {
     send_with_timeout(Request::get(&url).credentials(RequestCredentials::Include)).await
 }
 
-#[derive(Debug, Deserialize)]
-struct CheckoutResponse {
-    checkout_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct BillingPortalResponse {
-    portal_url: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CheckoutRequest<'a> {
-    interval: &'a str,
-}
-
-pub async fn start_checkout(interval: &'static str) -> Result<String, String> {
-    let mut refreshed = false;
-    let response = loop {
-        let request = Request::post(&api_url("/billing/checkout"))
-            .credentials(RequestCredentials::Include)
-            .json(&CheckoutRequest { interval })
-            .map_err(|_| "the checkout request could not be prepared".to_owned())?;
-        let response = send_request_with_timeout(request)
-            .await
-            .map_err(|_| "the billing service could not be reached".to_owned())?;
-        if response.status() == 401 && !refreshed && refresh_session_once().await {
-            refreshed = true;
-            continue;
-        }
-        break response;
-    };
-    if !(200..300).contains(&response.status()) {
-        let status = response.status();
-        if status == 401 {
-            return Err("your session expired; please sign in again before upgrading".to_owned());
-        }
-        let detail = response.text().await.unwrap_or_default();
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("checkout could not start (HTTP {status}); please try again")
-        } else {
-            format!("checkout could not start: {detail}")
-        });
-    }
-    response
-        .json::<CheckoutResponse>()
-        .await
-        .map(|checkout| checkout.checkout_url)
-        .map_err(|_| "the billing service returned an unexpected response".to_owned())
+pub async fn start_checkout(_interval: &'static str) -> Result<String, String> {
+    Err("paid sync was removed; every signed-in account syncs".to_owned())
 }
 
 pub async fn start_billing_portal() -> Result<String, String> {
-    let mut refreshed = false;
-    let response = loop {
-        let response = send_with_timeout(
-            Request::post(&api_url("/billing/portal")).credentials(RequestCredentials::Include),
-        )
-        .await
-        .map_err(|_| "the billing service could not be reached".to_owned())?;
-        if response.status() == 401 && !refreshed && refresh_session_once().await {
-            refreshed = true;
-            continue;
-        }
-        break response;
-    };
-    if !(200..300).contains(&response.status()) {
-        let status = response.status();
-        if status == 401 {
-            return Err("your session expired; please sign in again".to_owned());
-        }
-        let detail = response.text().await.unwrap_or_default();
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("billing portal could not open (HTTP {status}); please try again")
-        } else {
-            format!("billing portal could not open: {detail}")
-        });
-    }
-    response
-        .json::<BillingPortalResponse>()
-        .await
-        .map(|portal| portal.portal_url)
-        .map_err(|_| "the billing service returned an unexpected response".to_owned())
+    Err("paid sync was removed; every signed-in account syncs".to_owned())
 }
 
 fn checkout_return_state_from_search(search: &str) -> CheckoutReturnState {
@@ -479,46 +431,11 @@ pub fn checkout_return_state() -> CheckoutReturnState {
     checkout_return_state_from_search(&search)
 }
 
-async fn wait_ms(milliseconds: i32) {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        let Some(window) = web_sys::window() else {
-            let _ = resolve.call0(&wasm_bindgen::JsValue::NULL);
-            return;
-        };
-        let callback = Closure::once_into_js(move || {
-            let _ = resolve.call0(&wasm_bindgen::JsValue::NULL);
-        });
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            callback.unchecked_ref(),
-            milliseconds,
-        );
-    });
-    let _ = JsFuture::from(promise).await;
-}
-
 /// A successful checkout redirects back before the webhook is guaranteed to
 /// have reached us. Give the server a short window to apply the verified
 /// subscription event before showing the upgrade gate again.
 pub async fn load_account_state_after_checkout() -> AccountState {
-    let mut state = load_account_state().await;
-    if checkout_return_state() != CheckoutReturnState::Pending
-        || matches!(
-            state,
-            AccountState::Guest | AccountState::Expired | AccountState::Unavailable
-        )
-        || state.entitlement().is_some_and(Entitlement::can_sync)
-    {
-        return state;
-    }
-
-    for _ in 0..15 {
-        wait_ms(2_000).await;
-        state = load_account_state().await;
-        if state.entitlement().is_some_and(Entitlement::can_sync) {
-            break;
-        }
-    }
-    state
+    load_account_state().await
 }
 
 pub async fn sign_out() {

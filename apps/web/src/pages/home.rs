@@ -152,19 +152,9 @@ fn Header(account_state: RwSignal<AccountState>) -> impl IntoView {
                         <a href="/app" class="inline-flex items-center hover:text-ink">
                             "open board"
                         </a>
-                        {if entitlement.can_sync() {
-                            view! {
-                                <span class="hidden items-center rounded-[3px] border border-note-ink-green/30 bg-note-green/60 px-2 py-1 text-xs text-note-ink-green sm:inline-flex">
-                                    "pro member"
-                                </span>
-                            }.into_any()
-                        } else {
-                            view! {
-                                <a href="/app" class="rounded-[3px] bg-marker px-3 py-1.5 font-medium text-ink hover:brightness-95">
-                                    "upgrade"
-                                </a>
-                            }.into_any()
-                        }}
+<span class="hidden items-center rounded-[3px] border border-note-ink-green/30 bg-note-green/60 px-2 py-1 text-xs text-note-ink-green sm:inline-flex">
+                            "sync on"
+                        </span>
                         <button
                             type="button"
                             on:click=move |_| spawn_local(sign_out())
@@ -317,7 +307,7 @@ pub fn Home() -> impl IntoView {
                         <Feature
                             icon="sync ⇄"
                             title="Sync, only if you want"
-                            body="Your board stays local by default. Pro adds optional, account-based cloud sync so your spaces stay in step across devices."
+                            body="Your board stays local by default. Sign in for optional, account-based cloud sync so your spaces stay in step across devices."
                         />
                     </div>
                 </section>
@@ -342,10 +332,10 @@ pub fn Home() -> impl IntoView {
                         </div>
                         <div class="rounded-md border border-ink/20 p-6 rotate-[-0.5deg] shadow-md bg-note-yellow text-note-ink-yellow">
                             <h3 class="text-lg font-semibold">
-                                "pro"
+                                "sync"
                             </h3>
                             <p class="font-handwriting text-5xl mt-1">
-                                "$2 / mo · $20 / yr"
+                                "free with account"
                             </p>
                             <ul class="mt-3 space-y-1 text-sm">
                                 <li>"account-based cloud sync across devices"</li>
@@ -356,7 +346,7 @@ pub fn Home() -> impl IntoView {
                                 href="/signup"
                                 class="mt-5 inline-block rounded-[3px] bg-ink px-4 py-2 text-sm text-paper hover:brightness-110"
                             >
-                                "choose Pro after sign up"
+                                "sign up for sync"
                             </a>
                         </div>
                     </div>

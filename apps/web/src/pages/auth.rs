@@ -10,6 +10,7 @@ use super::account::{
 };
 use super::api::{api_url, send_request_with_timeout};
 
+#[allow(dead_code)]
 const PENDING_AUTH_STORAGE_KEY: &str = "task_space_pending_auth";
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -82,6 +83,7 @@ fn redirect_if_authenticated() {
     });
 }
 
+#[allow(dead_code)]
 fn remember_pending_authentication_token(response: &AuthApiResponse) {
     let Some(token) = response.pending_authentication_token.as_deref() else {
         return;
@@ -94,12 +96,14 @@ fn remember_pending_authentication_token(response: &AuthApiResponse) {
     }
 }
 
+#[allow(dead_code)]
 fn pending_authentication_token() -> Option<String> {
     let window = web_sys::window()?;
     let storage = window.session_storage().ok()??;
     storage.get_item(PENDING_AUTH_STORAGE_KEY).ok()?
 }
 
+#[allow(dead_code)]
 fn forget_pending_authentication_token() {
     if let Some(window) = web_sys::window()
         && let Ok(Some(storage)) = window.session_storage()
@@ -130,6 +134,55 @@ fn AuthFrame(title: &'static str, body: &'static str, children: Children) -> imp
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+struct OAuthProviders {
+    #[serde(default)]
+    google: bool,
+    #[serde(default)]
+    github: bool,
+}
+
+#[component]
+fn OAuthButtons() -> impl IntoView {
+    let providers = RwSignal::new(OAuthProviders::default());
+    spawn_local(async move {
+        let Ok(response) = Request::get(&api_url("/auth/oauth-providers"))
+            .credentials(RequestCredentials::Include)
+            .send()
+            .await
+        else {
+            return;
+        };
+        if let Ok(body) = response.json::<OAuthProviders>().await {
+            providers.set(body);
+        }
+    });
+    view! {
+        {move || {
+            let show_google = providers.get().google;
+            let show_github = providers.get().github;
+            if !show_google && !show_github {
+                return ().into_any();
+            }
+            view! {
+                <div class="mt-4 space-y-2">
+                    {show_google.then(|| view! {
+                        <a href={api_url("/auth/oauth/google")} class="block w-full rounded-[3px] border border-ink-soft/25 px-4 py-2 text-center text-sm text-ink hover:bg-white/70">
+                            "continue with Google"
+                        </a>
+                    })}
+                    {show_github.then(|| view! {
+                        <a href={api_url("/auth/oauth/github")} class="block w-full rounded-[3px] border border-ink-soft/25 px-4 py-2 text-center text-sm text-ink hover:bg-white/70">
+                            "continue with GitHub"
+                        </a>
+                    })}
+                </div>
+            }
+                .into_any()
+        }}
+    }
+}
+
 #[component]
 pub fn SignIn() -> impl IntoView {
     let email = RwSignal::new(String::new());
@@ -151,17 +204,13 @@ pub fn SignIn() -> impl IntoView {
         };
         spawn_local(async move {
             match post_auth("/auth/sign-in", &payload).await {
-                Ok(response) if response.status == "authenticated" => {
+                Ok(response) if response.status == "ok" || response.status == "authenticated" => {
                     if let Some(account_id) = response.account_id.as_deref() {
                         remember_authenticated_account(account_id);
                     } else {
                         remember_authenticated_session();
                     }
                     redirect("/app")
-                }
-                Ok(response) if response.status == "verification_required" => {
-                    remember_pending_authentication_token(&response);
-                    redirect("/verify-email")
                 }
                 Ok(response) => error.set(response.message),
                 Err(message) => error.set(Some(message)),
@@ -194,7 +243,7 @@ pub fn SignIn() -> impl IntoView {
                         type="password"
                         autocomplete="current-password"
                         required=true
-                        minlength="10"
+                        minlength="8"
                         on:input=move |event| password.set(event_target_value(&event))
                     />
                 </label>
@@ -209,6 +258,7 @@ pub fn SignIn() -> impl IntoView {
                     {move || if submitting.get() { "checking..." } else { "sign in" }}
                 </button>
             </form>
+            <OAuthButtons />
             <a href="/forgot-password" class="mt-4 block text-center text-xs text-ink-soft underline">
                 "forgot your password?"
             </a>
@@ -245,17 +295,13 @@ pub fn SignUp() -> impl IntoView {
         };
         spawn_local(async move {
             match post_auth("/auth/sign-up", &payload).await {
-                Ok(response) if response.status == "authenticated" => {
+                Ok(response) if response.status == "ok" || response.status == "authenticated" => {
                     if let Some(account_id) = response.account_id.as_deref() {
                         remember_authenticated_account(account_id);
                     } else {
                         remember_authenticated_session();
                     }
                     redirect("/app")
-                }
-                Ok(response) if response.status == "verification_required" => {
-                    remember_pending_authentication_token(&response);
-                    redirect("/verify-email")
                 }
                 Ok(response) => error.set(response.message),
                 Err(message) => error.set(Some(message)),
@@ -288,7 +334,7 @@ pub fn SignUp() -> impl IntoView {
                         type="password"
                         autocomplete="new-password"
                         required=true
-                        minlength="10"
+                        minlength="8"
                         on:input=move |event| password.set(event_target_value(&event))
                     />
                 </label>
@@ -299,7 +345,7 @@ pub fn SignUp() -> impl IntoView {
                         type="password"
                         autocomplete="new-password"
                         required=true
-                        minlength="10"
+                        minlength="8"
                         on:input=move |event| confirmation.set(event_target_value(&event))
                     />
                 </label>
@@ -314,6 +360,7 @@ pub fn SignUp() -> impl IntoView {
                     {move || if submitting.get() { "creating..." } else { "create account" }}
                 </button>
             </form>
+            <OAuthButtons />
             <div class="mt-4 text-center text-sm text-ink-soft">
                 <a href="/signin" class="underline">"already have an account? sign in"</a>
             </div>
@@ -437,7 +484,7 @@ pub fn ResetPassword() -> impl IntoView {
                         type="password"
                         autocomplete="new-password"
                         required=true
-                        minlength="10"
+                        minlength="8"
                         on:input=move |event| password.set(event_target_value(&event))
                     />
                 </label>
@@ -448,7 +495,7 @@ pub fn ResetPassword() -> impl IntoView {
                         type="password"
                         autocomplete="new-password"
                         required=true
-                        minlength="10"
+                        minlength="8"
                         on:input=move |event| confirmation.set(event_target_value(&event))
                     />
                 </label>
@@ -492,7 +539,6 @@ pub fn VerifyEmail() -> impl IntoView {
                     } else {
                         remember_authenticated_session();
                     }
-                    forget_pending_authentication_token();
                     redirect("/app")
                 }
                 Err(value) => {

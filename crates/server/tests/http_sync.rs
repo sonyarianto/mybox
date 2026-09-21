@@ -8,19 +8,15 @@ use axum::http::header::{CONTENT_TYPE, COOKIE, HOST, ORIGIN};
 use axum::http::{Method, Request, StatusCode};
 use serde_json::{Value, json};
 use task_core::BoardData;
-use task_core::billing::{
-    BILLING_PROTOCOL_VERSION, BillingEvent, BillingEventType, SubscriptionPlan, SubscriptionStatus,
-};
 use task_core::sync::{
     EncodedUpdate, SYNC_DOCUMENT_SCHEMA_VERSION, SYNC_RECONCILE_PROTOCOL_VERSION,
 };
 use task_core::{Note, crdt::SpaceDoc};
-use task_server::dodo::{DodoClient, DodoClientConfig};
 use task_server::http::{
     AuthError, AuthenticatedAccount, RequestRateLimiter, SessionVerifier, SyncHttpState,
     health_router, protected_sync_router,
 };
-use task_server::postgres::{PostgresBillingStore, PostgresStoreError, PostgresSyncStore};
+use task_server::postgres::PostgresSyncStore;
 use tokio::sync::RwLock;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -31,8 +27,7 @@ use uuid::Uuid;
 ///   cargo test -p task-server --test http_sync -- --ignored --nocapture
 ///
 /// This test intentionally exercises the real Axum router against PostgreSQL,
-/// but uses a deterministic in-process verifier so it does not require a
-/// WorkOS session or expose provider credentials.
+/// but uses a deterministic in-process verifier so it needs no external auth.
 #[derive(Clone, Default)]
 struct TestVerifier {
     accounts: Arc<RwLock<HashMap<String, AuthenticatedAccount>>>,
@@ -48,17 +43,6 @@ impl SessionVerifier for TestVerifier {
             .cloned()
             .ok_or(AuthError::VerificationFailed)
     }
-}
-
-fn dodo_client() -> DodoClient {
-    DodoClient::new(DodoClientConfig {
-        api_key: "dodo_test_http_acceptance".to_owned(),
-        environment: "test_mode".to_owned(),
-        return_url: "https://app.test/app".to_owned(),
-        pro_monthly_product_id: "prod_http_monthly".to_owned(),
-        pro_yearly_product_id: "prod_http_yearly".to_owned(),
-    })
-    .expect("test Dodo configuration should validate without making a request")
 }
 
 async fn send(
@@ -98,36 +82,9 @@ fn bearer(token: &str) -> [(&'static str, &'static str); 1] {
     }
 }
 
-async fn activate_account(
-    billing: &PostgresBillingStore,
-    account_id: &str,
-    event_id: &str,
-) -> Result<(), PostgresStoreError> {
-    billing
-        .apply_event(&BillingEvent {
-            protocol_version: BILLING_PROTOCOL_VERSION,
-            provider: "http-test".to_owned(),
-            provider_event_id: event_id.to_owned(),
-            event_type: BillingEventType::SubscriptionStarted,
-            account_id: account_id.to_owned(),
-            plan: SubscriptionPlan::Pro,
-            status: SubscriptionStatus::Active,
-            provider_customer_id: None,
-            provider_subscription_id: None,
-            provider_payment_id: None,
-            refund_amount: None,
-            payment_amount: None,
-            current_period_end: None,
-            cancel_at_period_end: false,
-            occurred_at: 1_800_000_000,
-        })
-        .await
-        .map(|_| ())
-}
-
 #[tokio::test]
 #[ignore = "requires TASK_SPACE_TEST_DATABASE_URL"]
-async fn authenticated_http_boundary_enforces_csrf_entitlement_and_account_isolation() {
+async fn authenticated_http_boundary_enforces_csrf_and_account_isolation() {
     let database_url = std::env::var("TASK_SPACE_TEST_DATABASE_URL")
         .expect("set TASK_SPACE_TEST_DATABASE_URL for the HTTP acceptance test");
     let store = PostgresSyncStore::connect(&database_url)
@@ -135,7 +92,6 @@ async fn authenticated_http_boundary_enforces_csrf_entitlement_and_account_isola
         .expect("PostgreSQL should be reachable");
     store.migrate().await.expect("migrations should apply");
     let pool = store.pool().clone();
-    let billing = PostgresBillingStore::new(pool.clone());
 
     let account_a = format!("http-sync-a-{}", Uuid::new_v4());
     let account_b = format!("http-sync-b-{}", Uuid::new_v4());
@@ -148,18 +104,6 @@ async fn authenticated_http_boundary_enforces_csrf_entitlement_and_account_isola
             .execute(&pool)
             .await
             .expect("spaces should be removable");
-        sqlx::query("DELETE FROM billing_events WHERE account_id = $1 OR account_id = $2")
-            .bind(&account_a)
-            .bind(&account_b)
-            .execute(&pool)
-            .await
-            .expect("billing events should be removable");
-        sqlx::query("DELETE FROM billing_entitlements WHERE account_id = $1 OR account_id = $2")
-            .bind(&account_a)
-            .bind(&account_b)
-            .execute(&pool)
-            .await
-            .expect("entitlements should be removable");
     };
 
     store
@@ -172,21 +116,6 @@ async fn authenticated_http_boundary_enforces_csrf_entitlement_and_account_isola
         )
         .await
         .expect("account A should own the test space");
-    activate_account(
-        &billing,
-        &account_a,
-        &format!("http-test-event-a-{}", Uuid::new_v4()),
-    )
-    .await
-    .expect("account A should be entitled");
-    activate_account(
-        &billing,
-        &account_b,
-        &format!("http-test-event-b-{}", Uuid::new_v4()),
-    )
-    .await
-    .expect("account B should be entitled");
-
     let verifier = TestVerifier::default();
     verifier.accounts.write().await.extend([
         (
@@ -217,8 +146,6 @@ async fn authenticated_http_boundary_enforces_csrf_entitlement_and_account_isola
     let app = health_router(pool.clone(), Default::default()).merge(protected_sync_router(
         SyncHttpState {
             store: store.clone(),
-            billing: billing.clone(),
-            payments: dodo_client(),
             verifier: Arc::new(verifier),
             session_cookie_name: "task_space_session".to_owned(),
             allowed_origins: Arc::new(vec!["https://app.test".to_owned()]),

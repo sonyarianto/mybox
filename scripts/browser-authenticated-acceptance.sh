@@ -23,7 +23,7 @@ cleanup() {
     --env PGPASSWORD="$db_password" \
     postgres:17-alpine \
     psql --host postgres --username taskspace --dbname taskspace \
-      --command "DELETE FROM spaces WHERE account_id = '$account_id'; DELETE FROM billing_events WHERE account_id = '$account_id'; DELETE FROM billing_entitlements WHERE account_id = '$account_id';" \
+      --command "DELETE FROM spaces WHERE account_id = '$account_id';" \
       >/dev/null 2>&1 || true
 }
 trap cleanup EXIT

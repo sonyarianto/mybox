@@ -12474,7 +12474,7 @@ pub fn Board() -> impl IntoView {
                     <span class="hidden h-5 w-px bg-ink-soft/20 sm:block"></span>
                     {move || match account_state.get() {
                         AccountState::SignedIn(entitlement) => {
-                            let has_dodo_customer = entitlement.provider.as_deref() == Some("dodo")
+                            let has_billing_customer = entitlement.provider.is_some()
                                 && entitlement.provider_customer_id.is_some();
                             view! {
                             <span class=if entitlement.can_sync_at(now_millis() / 1_000) {
@@ -12490,7 +12490,7 @@ pub fn Board() -> impl IntoView {
                                         "upgrade"
                                     </a>
                                 }.into_any()
-                            } else if has_dodo_customer {
+                            } else if has_billing_customer {
                                 view! {
                                     <button
                                         type="button"
@@ -12878,19 +12878,12 @@ pub fn Board() -> impl IntoView {
 
             {move || match account_state.get() {
                 AccountState::SignedIn(entitlement) if !entitlement.can_sync_at(now_millis() / 1_000) => {
-                    let has_dodo_customer = entitlement.provider.as_deref() == Some("dodo")
+                    let has_billing_customer = entitlement.provider.is_some()
                         && entitlement.provider_customer_id.is_some();
-                    let status_message = match entitlement.status {
-                        task_core::billing::SubscriptionStatus::Free =>
-                            "your account is ready, but sync is waiting for Pro",
-                        task_core::billing::SubscriptionStatus::Pending =>
-                            "your payment is still processing; sync will start after confirmation",
-                        task_core::billing::SubscriptionStatus::PastDue =>
-                            "your payment needs attention before sync can continue",
-                        task_core::billing::SubscriptionStatus::Canceled
-                        | task_core::billing::SubscriptionStatus::Ended =>
-                            "your Pro subscription is not active right now",
-                        task_core::billing::SubscriptionStatus::Active =>
+                    let status_message = match entitlement.status.as_str() {
+                        "pending" =>
+                            "your account is still being prepared; sync will start after confirmation",
+                        _ =>
                             "this account is not enabled for sync yet",
                     };
                     // Free accounts keep the device-local board available;
@@ -12910,7 +12903,7 @@ pub fn Board() -> impl IntoView {
                                     <button type="button" disabled=move || checkout_pending.get() on:click=move |_| begin_checkout("year") class="rounded-[3px] border border-note-ink-yellow/40 px-3 py-2 text-sm font-medium hover:bg-note-yellow/50 disabled:cursor-wait disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-note-ink-yellow/50">
                                         {move || if checkout_pending.get() { "opening checkout…" } else { "Pro · $20 / year" }}
                                     </button>
-                                    {if has_dodo_customer {
+                                    {if has_billing_customer {
                                         view! {
                                             <button
                                                 type="button"

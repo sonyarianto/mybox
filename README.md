@@ -23,8 +23,8 @@ Local work is not deleted when an account expires or the network is unavailable.
 - Local data and sync model: IndexedDB, Yrs, and Y-Sync
 - API: Axum and SQLx
 - Database: PostgreSQL
-- Authentication: WorkOS
-- Billing: Dodo Payments
+- Authentication: local email+password with opaque Postgres sessions, optional Google/GitHub OAuth
+- Billing: none (every signed-in account syncs)
 - Deployment: Docker Compose, Nginx, and Caddy
 
 ## Self-hosting
@@ -33,8 +33,7 @@ Local work is not deleted when an account expires or the network is unavailable.
 
 - A Linux host with Docker and Docker Compose
 - A domain pointing to the host for production HTTPS
-- WorkOS credentials for accounts and sessions
-- Dodo Payments credentials and Pro product IDs for paid cloud sync
+- Optional Google/GitHub OAuth client IDs and secrets for one-click sign-in
 
 ### Configure
 
@@ -46,20 +45,13 @@ cp .env.example .env
 ```
 
 At minimum, configure the database values, `TASK_SPACE_ALLOWED_ORIGINS`, and
-the WorkOS variables. To enable Pro, also configure:
+`AUTH_POST_LOGIN_REDIRECT`.
 
-- `DODO_PAYMENTS_API_KEY`
-- `DODO_PAYMENTS_WEBHOOK_KEY`
-- `DODO_PAYMENTS_ENVIRONMENT`
-- `DODO_PAYMENTS_RETURN_URL`
-- `DODO_PRO_MONTHLY_PRODUCT_ID`
-- `DODO_PRO_YEARLY_PRODUCT_ID`
-
-Use the public HTTPS origin consistently in `WORKOS_REDIRECT_URI`,
-`WORKOS_POST_LOGIN_REDIRECT_URI`, `DODO_PAYMENTS_RETURN_URL`, and
-`TASK_SPACE_ALLOWED_ORIGINS`. Register the matching sign-in, sign-up, sign-out,
-password-reset, and callback URLs in WorkOS. Configure Dodo to send all
-subscription lifecycle events to `/webhooks/dodo`.
+Use the public HTTPS origin consistently in `AUTH_POST_LOGIN_REDIRECT` and
+`TASK_SPACE_ALLOWED_ORIGINS`. To offer Google/GitHub sign-in, register
+`OAUTH_GOOGLE_REDIRECT_URI` / `OAUTH_GITHUB_REDIRECT_URI`
+(`https://your-domain.example/auth/callback`) with each provider and set the
+matching client IDs and secrets.
 
 ### Build and run
 
@@ -101,10 +93,9 @@ make dev
 ```
 
 The UI runs at `http://localhost:8080` and the API at `http://localhost:3000`.
-For local auth and checkout testing, use the localhost URLs from `.env.example`
-and Dodo test-mode credentials. A payment provider cannot deliver webhooks to a
-private localhost address, so use an HTTPS tunnel when testing the complete
-checkout-to-entitlement flow.
+For local auth testing, use the localhost URLs from `.env.example`.
+OAuth providers cannot redirect to a private localhost address, so use an
+HTTPS tunnel (see `make cloudflare-tunnel`) when testing Google/GitHub sign-in.
 
 ## Useful commands
 

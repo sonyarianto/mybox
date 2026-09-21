@@ -51,15 +51,15 @@ groups:
           summary: Task Space is failing database-backed readiness checks
           description: Investigate PostgreSQL availability, disk pressure, recovery state, and connection exhaustion.
 
-      - alert: TaskSpaceWebhookFailures
-        expr: sum(rate(task_space_webhook_failures_total[10m])) > 0
+      - alert: TaskSpaceAuthFailures
+        expr: sum(rate(task_space_api_failures_total{kind=~"auth_.*"}[10m])) > 0
         for: 10m
         labels:
-          severity: page
-          owner: billing
+          severity: ticket
+          owner: auth
         annotations:
-          summary: Dodo webhook processing is failing
-          description: Check webhook signatures, provider reachability, and the billing inbox.
+          summary: Local auth failures are sustained
+          description: Check signup/signin rate limits, session expiry, and OAuth provider reachability.
 
       - alert: TaskSpaceCompactionStalled
         expr: increase(task_space_sync_compaction_runs_total[2h]) == 0
