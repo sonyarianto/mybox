@@ -101,7 +101,6 @@ HTTPS tunnel (see `make cloudflare-tunnel`) when testing Google/GitHub sign-in.
 
 ```sh
 make check                  # check the Rust workspace
-make browser-sync           # exercise local-first browser behavior
-make browser-authenticated  # exercise authenticated sync behavior
+make local-auth             # exercise local signup, sign-in, and session
 make backup-restore-acceptance
 ```

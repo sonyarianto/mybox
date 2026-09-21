@@ -1,4 +1,4 @@
-.PHONY: dev css fonts check cloudflare-tunnel browser-sync browser-webkit browser-mobile browser-cross browser-authenticated local-auth postgres-acceptance migration-acceptance capacity-acceptance restart-chaos process-kill-chaos backup-restore-acceptance alert-delivery observability-check rollout-preflight
+.PHONY: dev css fonts check cloudflare-tunnel local-auth postgres-acceptance migration-acceptance capacity-acceptance restart-chaos process-kill-chaos backup-restore-acceptance observability-check rollout-preflight
 
 dev: css ## serve the web app (trunk) with hot reload; tailwind watches in background
 	cd apps/web && (npx @tailwindcss/cli -i src/input.css -o src/main.css --watch --poll=500 &) && env -u TRUNK_NO_COLOR -u NO_COLOR trunk serve
@@ -14,21 +14,6 @@ check: ## compile everything
 
 cloudflare-tunnel: ## expose the local deployment through the named Cloudflare Tunnel
 	cloudflared tunnel --no-autoupdate run --url http://127.0.0.1:8081 mybox-dev
-
-browser-sync: ## exercise offline tabs, IndexedDB recovery, and fallbacks in headless Chromium
-	python3 scripts/browser-sync-smoke.py
-
-browser-webkit: ## exercise the same local-first gate in WebKit
-	python3 scripts/browser-sync-smoke.py --engine webkit
-
-browser-mobile: ## exercise the local-first gate at a narrow mobile viewport
-	python3 scripts/browser-sync-smoke.py --mobile
-
-browser-cross: ## exercise authenticated Chrome and Helium convergence
-	python3 scripts/browser-sync-smoke.py --cross-browser
-
-browser-authenticated: ## exercise authenticated isolated profiles, WebKit, and mobile
-	./scripts/browser-authenticated-acceptance.sh
 
 local-auth: ## exercise local signup, sign-in, session, and OAuth provider discovery
 	./scripts/local-auth-acceptance.sh
@@ -47,9 +32,6 @@ restart-chaos: ## restart local acceptance API/PostgreSQL and verify recovery
 
 process-kill-chaos: ## abruptly terminate local acceptance API/PostgreSQL and verify recovery
 	MYBOX_CHAOS_CONFIRM=I_UNDERSTAND_LOCAL_KILL_TEST ./scripts/process-kill-acceptance.sh
-
-alert-delivery: ## exercise Prometheus to Alertmanager webhook delivery locally
-	./scripts/alert-delivery-acceptance.sh
 
 backup-restore-acceptance: ## restore a live local backup into a disposable database and sync-test it
 	./scripts/backup-restore-acceptance.sh

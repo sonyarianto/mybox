@@ -28,7 +28,7 @@ cp -- \
   "$repo_dir/deploy/observability/grafana-mybox.json" \
   "$observability_tmp_dir/"
 
-python3 -m json.tool "$observability_tmp_dir/grafana-mybox.json" >/dev/null
+jq empty "$observability_tmp_dir/grafana-mybox.json"
 
 # Prometheus validates credentials_file during config parsing. The real secret
 # is intentionally never copied into this temporary validation mount.
